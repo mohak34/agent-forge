@@ -1,0 +1,6 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler"
+  },
+  "include": ["src/**/*.d.ts", "src/**/*.js", "src/**/*.svelte", "vite.config.ts"]
+}

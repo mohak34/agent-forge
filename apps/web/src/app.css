@@ -1,0 +1,13 @@
+@import "@fontsource/ibm-plex-sans";
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  background: radial-gradient(circle at 20% 10%, #e4f1ff 0%, #f8fafc 35%, #ffffff 100%);
+  color: #0f172a;
+}

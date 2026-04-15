@@ -1,0 +1,24 @@
+{
+  "name": "agent-forge-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prepare": "svelte-kit sync",
+    "dev": "vite dev --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-sans": "5.2.8",
+    "@sveltejs/adapter-auto": "7.0.1",
+    "@sveltejs/kit": "2.57.1",
+    "@sveltejs/vite-plugin-svelte": "5.1.1",
+    "@tailwindcss/postcss": "4.2.2",
+    "postcss": "8.5.9",
+    "svelte": "5.55.4",
+    "tailwindcss": "4.2.2",
+    "typescript": "6.0.2",
+    "vite": "6.3.5"
+  }
+}
