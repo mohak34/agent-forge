@@ -17,6 +17,9 @@ class RunResponse(BaseModel):
     goal: str
     memory_enabled: bool
     status: RunStatus
+    budget_limit_usd: float
+    budget_used_usd: float
+    budget_exceeded: bool
     provider: str
     model: str
     output_text: str
@@ -46,6 +49,10 @@ class TaskNodeResponse(BaseModel):
     kind: str
     sequence: int
     depends_on: str
+    routed_provider: str
+    routed_model: str
+    token_estimate: int
+    cost_estimate_usd: float
     status: TaskNodeStatus
     output_text: str
     created_at: datetime

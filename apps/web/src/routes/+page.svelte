@@ -7,6 +7,9 @@
     goal: string;
     memory_enabled: boolean;
     status: string;
+    budget_limit_usd: number;
+    budget_used_usd: number;
+    budget_exceeded: boolean;
     provider: string;
     model: string;
     output_text: string;
@@ -32,6 +35,10 @@
     kind: string;
     sequence: number;
     depends_on: string;
+    routed_provider: string;
+    routed_model: string;
+    token_estimate: number;
+    cost_estimate_usd: number;
     status: string;
     output_text: string;
     created_at: string;
@@ -252,6 +259,9 @@
         <p><span class="font-medium">ID:</span> {run.id}</p>
         <p><span class="font-medium">Status:</span> {run.status}</p>
         <p><span class="font-medium">Memory enabled:</span> {run.memory_enabled ? "yes" : "no"}</p>
+        <p><span class="font-medium">Budget limit:</span> ${run.budget_limit_usd.toFixed(4)}</p>
+        <p><span class="font-medium">Budget used:</span> ${run.budget_used_usd.toFixed(4)}</p>
+        <p><span class="font-medium">Budget exceeded:</span> {run.budget_exceeded ? "yes" : "no"}</p>
         <p><span class="font-medium">Provider:</span> {run.provider || "n/a"}</p>
         <p><span class="font-medium">Model:</span> {run.model || "n/a"}</p>
         <p><span class="font-medium">Token estimate:</span> {run.token_estimate}</p>
@@ -282,6 +292,12 @@
           <li class="rounded-lg border border-slate-200 p-3 text-sm">
             <p class="font-medium">{item.sequence}. {item.title}</p>
             <p class="text-slate-600">kind={item.kind} depends_on={item.depends_on || "none"}</p>
+            <p class="text-slate-600">
+              route={item.routed_provider || "n/a"}/{item.routed_model || "n/a"}
+            </p>
+            <p class="text-slate-600">
+              est_tokens={item.token_estimate} est_cost=${item.cost_estimate_usd.toFixed(6)}
+            </p>
             <p class="mt-1 text-xs text-slate-500">status={item.status}</p>
           </li>
         {/each}

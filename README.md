@@ -11,6 +11,7 @@ agent-forge is a modular multi-agent orchestration platform with a SvelteKit fro
 - Phase E baseline implemented: read-only tool runtime with policy checks and tool catalog endpoint.
 - Phase F baseline implemented: human-in-the-loop approval queue and approve/reject decision flow.
 - Phase G baseline implemented: opt-in persistent memory retrieval/store across runs.
+- Phase H baseline implemented: rule-based model routing with budget checks and fallback logic.
 
 ## Stack
 
@@ -82,6 +83,21 @@ agent-forge is a modular multi-agent orchestration platform with a SvelteKit fro
 - Memory storage after completion (`memory.stored` event)
 - Memory endpoint: `GET /api/v0/memory`
 - Dashboard memory panel listing recent memory items
+
+## Phase H includes
+
+- Rule-based router per task kind (`planning`, `research`, `analysis`, default)
+- Provider/model routing metadata stored on each task node
+- Budget tracking fields on runs:
+  - `budget_limit_usd`
+  - `budget_used_usd`
+  - `budget_exceeded`
+- Budget and routing events in timeline:
+  - `model.routed`
+  - `budget.checked`
+  - `model.fallback`
+  - `budget.exceeded`
+- Automatic fallback to local model route when budget is tight
 
 ## Repository layout
 

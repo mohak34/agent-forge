@@ -172,6 +172,8 @@ async def create_goal(payload: GoalCreate, db: Session = Depends(get_db)) -> Run
                 )
 
             run.status = RunStatus.COMPLETED
+            if run.budget_exceeded and run.output_text.strip() == "":
+                run.status = RunStatus.FAILED
             create_event(db, run.id, "run.completed", "Run finished")
     except Exception as exc:
         run.status = RunStatus.FAILED
@@ -297,6 +299,8 @@ async def decide_approval(
                 actor="memory",
             )
         run.status = RunStatus.COMPLETED
+        if run.budget_exceeded and run.output_text.strip() == "":
+            run.status = RunStatus.FAILED
         create_event(db, run.id, "run.completed", "Run finished after approval")
     except Exception as exc:
         run.status = RunStatus.FAILED

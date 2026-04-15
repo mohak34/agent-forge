@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -23,6 +23,9 @@ class Run(Base):
     goal: Mapped[str] = mapped_column(Text)
     memory_enabled: Mapped[bool] = mapped_column(default=False)
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.QUEUED)
+    budget_limit_usd: Mapped[float] = mapped_column(Float, default=0.05)
+    budget_used_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    budget_exceeded: Mapped[bool] = mapped_column(Boolean, default=False)
     provider: Mapped[str] = mapped_column(String(50), default="")
     model: Mapped[str] = mapped_column(String(120), default="")
     output_text: Mapped[str] = mapped_column(Text, default="")
@@ -72,6 +75,10 @@ class TaskNode(Base):
     kind: Mapped[str] = mapped_column(String(80), default="generic")
     sequence: Mapped[int] = mapped_column(Integer, default=0)
     depends_on: Mapped[str] = mapped_column(Text, default="")
+    routed_provider: Mapped[str] = mapped_column(String(50), default="")
+    routed_model: Mapped[str] = mapped_column(String(120), default="")
+    token_estimate: Mapped[int] = mapped_column(Integer, default=0)
+    cost_estimate_usd: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[TaskNodeStatus] = mapped_column(
         Enum(TaskNodeStatus), default=TaskNodeStatus.PENDING
     )

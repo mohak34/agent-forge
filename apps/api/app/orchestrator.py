@@ -4,6 +4,7 @@ from app.critic import critic_review
 from app.executor import run_single_agent
 from app.models import Run, TaskNode, TaskNodeStatus
 from app.policy import evaluate_tool_use
+from app.router import estimate_cost_usd, estimate_tokens, route_for_task
 from app.specialists import select_specialist, specialist_instruction
 from app.tools import invoke_tool
 
@@ -59,6 +60,18 @@ async def execute_task_graph(
 
         prompt = specialist_instruction(specialist=specialist, goal=run.goal, task_title=node.title)
 
+        budget_remaining = max(run.budget_limit_usd - run.budget_used_usd, 0.0)
+        route = route_for_task(node.kind, budget_remaining)
+        node.routed_provider = route.provider
+        node.routed_model = route.model
+        create_event(
+            db,
+            run.id,
+            "model.routed",
+            f"node={node.sequence} provider={route.provider} model={route.model} reason={route.reason}",
+            actor="router",
+        )
+
         selected_tool = ""
         tool_input = ""
         if node.kind == "research":
@@ -98,7 +111,55 @@ async def execute_task_graph(
             )
             prompt = f"{prompt}\nTool context ({selected_tool}): {tool_result}"
 
-        result = await run_single_agent(prompt)
+        token_estimate = estimate_tokens(prompt)
+        estimated_cost = estimate_cost_usd(route.provider, token_estimate)
+        node.token_estimate = token_estimate
+        node.cost_estimate_usd = estimated_cost
+
+        create_event(
+            db,
+            run.id,
+            "budget.checked",
+            f"node={node.sequence} remaining={budget_remaining:.6f} estimated={estimated_cost:.6f}",
+            actor="router",
+        )
+
+        if (
+            run.budget_used_usd + estimated_cost > run.budget_limit_usd
+            and route.provider != "lmstudio"
+        ):
+            fallback = route_for_task(node.kind, 0.0)
+            node.routed_provider = fallback.provider
+            node.routed_model = fallback.model
+            create_event(
+                db,
+                run.id,
+                "model.fallback",
+                f"node={node.sequence} fallback to provider={fallback.provider} model={fallback.model}",
+                actor="router",
+            )
+            route = fallback
+            estimated_cost = estimate_cost_usd(route.provider, token_estimate)
+            node.cost_estimate_usd = estimated_cost
+
+        if run.budget_used_usd + estimated_cost > run.budget_limit_usd:
+            run.budget_exceeded = True
+            create_event(
+                db,
+                run.id,
+                "budget.exceeded",
+                f"node={node.sequence} budget limit reached, stopping execution",
+                actor="router",
+            )
+            node.status = TaskNodeStatus.BLOCKED
+            break
+
+        result = await run_single_agent(
+            prompt,
+            provider_override=route.provider,
+            model_override=route.model,
+        )
+        run.budget_used_usd = round(run.budget_used_usd + estimated_cost, 6)
         node_output = result["text"][:600].strip()
 
         verdict, critic_note = critic_review(node_output)
