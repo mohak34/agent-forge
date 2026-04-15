@@ -36,3 +36,23 @@ lerna-debug.log
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.python-version
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Svelte/Vite/Bun
+apps/web/.svelte-kit/
+apps/web/.vite/
+
+# Docker/local runtime artifacts
+.env.local
