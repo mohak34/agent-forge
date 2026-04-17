@@ -1,6 +1,17 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { createRun, getRun, getRunTasks, getRunTimeline, listMemory } from "../lib/api";
+  import {
+    createRun,
+    createTemplate,
+    exportTemplate,
+    getRun,
+    getRunTasks,
+    getRunTimeline,
+    importTemplate,
+    listMemory,
+    listTemplates,
+    runFromTemplate
+  } from "../lib/api";
 
   type RunResponse = {
     id: string;
@@ -72,6 +83,17 @@
     created_at: string;
   };
 
+  type AgentTemplate = {
+    id: string;
+    name: string;
+    description: string;
+    version: string;
+    config_json: string;
+    is_builtin: boolean;
+    created_at: string;
+    updated_at: string;
+  };
+
   let goal = "Research top 5 competitors and provide a summary table.";
   let run: RunResponse | null = null;
   let timeline: any[] = [];
@@ -83,6 +105,13 @@
   let approvalPollId: ReturnType<typeof setInterval> | null = null;
   let memoryEnabled = false;
   let memoryItems: any[] = [];
+  let templates: any[] = [];
+  let selectedTemplateId = "";
+  let templateName = "Research Team";
+  let templateDescription = "Reusable research-oriented orchestration settings";
+  let templateVersion = "1.0.0";
+  let templateConfigJson = '{"goal_prefix":"Use a research-first workflow with concise structured output."}';
+  let exportedTemplateJson = "";
 
   function asTimelineEvent(value: any): TimelineEvent {
     return value as TimelineEvent;
@@ -104,6 +133,10 @@
     return value as MemoryItem;
   }
 
+  function asTemplate(value: any): AgentTemplate {
+    return value as AgentTemplate;
+  }
+
   async function submitGoal() {
     loading = true;
     error = "";
@@ -120,6 +153,32 @@
       updateApprovalPolling();
     } catch (e) {
       error = e instanceof Error ? e.message : "Unknown error";
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function submitGoalWithTemplate() {
+    if (!selectedTemplateId) {
+      error = "Select a template first";
+      return;
+    }
+    loading = true;
+    error = "";
+    try {
+      const createdRun = (await runFromTemplate(
+        selectedTemplateId,
+        goal,
+        memoryEnabled
+      )) as RunResponse;
+      run = createdRun;
+      timeline = (await getRunTimeline(createdRun.id)) as TimelineEvent[];
+      tasks = (await getRunTasks(createdRun.id)) as TaskNode[];
+      await loadApprovals();
+      await loadMemory();
+      updateApprovalPolling();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to run with template";
     } finally {
       loading = false;
     }
@@ -154,6 +213,48 @@
       memoryItems = (await listMemory()) as MemoryItem[];
     } catch (e) {
       error = e instanceof Error ? e.message : "Failed to load memory";
+    }
+  }
+
+  async function loadTemplates() {
+    try {
+      templates = (await listTemplates()) as AgentTemplate[];
+      if (!selectedTemplateId && templates.length > 0) {
+        selectedTemplateId = (templates[0] as AgentTemplate).id;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to load templates";
+    }
+  }
+
+  async function createTemplateItem() {
+    try {
+      await createTemplate(templateName, templateDescription, templateVersion, templateConfigJson);
+      await loadTemplates();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to create template";
+    }
+  }
+
+  async function importTemplateItem() {
+    try {
+      await importTemplate(templateName, templateDescription, templateVersion, templateConfigJson);
+      await loadTemplates();
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to import template";
+    }
+  }
+
+  async function exportSelectedTemplate() {
+    if (!selectedTemplateId) {
+      error = "Select a template first";
+      return;
+    }
+    try {
+      const data = await exportTemplate(selectedTemplateId);
+      exportedTemplateJson = JSON.stringify(data, null, 2);
+    } catch (e) {
+      error = e instanceof Error ? e.message : "Failed to export template";
     }
   }
 
@@ -217,6 +318,7 @@
     loadTools();
     loadApprovals();
     loadMemory();
+    loadTemplates();
 
     return () => {
       stopApprovalPolling();
@@ -242,6 +344,13 @@
       >
         {loading ? "Running..." : "Create Run"}
       </button>
+      <button
+        class="w-fit rounded-lg bg-slate-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        on:click={submitGoalWithTemplate}
+        disabled={loading || !goal.trim() || !selectedTemplateId}
+      >
+        {loading ? "Running..." : "Run With Template"}
+      </button>
       <label class="flex items-center gap-2 text-sm text-slate-700">
         <input type="checkbox" bind:checked={memoryEnabled} />
         Enable persistent memory for this run
@@ -253,6 +362,42 @@
   </section>
 
   {#if run}
+    <section class="rounded-xl border border-slate-200 bg-white/90 p-6 shadow-sm">
+      <h2 class="text-lg font-semibold">Agent Registry</h2>
+      <div class="mt-3 grid gap-3 text-sm">
+        <input class="rounded border border-slate-300 p-2" bind:value={templateName} placeholder="Template name" />
+        <input
+          class="rounded border border-slate-300 p-2"
+          bind:value={templateDescription}
+          placeholder="Template description"
+        />
+        <input class="rounded border border-slate-300 p-2" bind:value={templateVersion} placeholder="Version" />
+        <textarea
+          class="rounded border border-slate-300 p-2"
+          bind:value={templateConfigJson}
+          placeholder="&#123;&quot;goal_prefix&quot;:&quot;...&quot;&#125;"
+        ></textarea>
+        <button class="w-fit rounded bg-slate-800 px-3 py-2 text-white" on:click={createTemplateItem}
+          >Save Template</button>
+        <button class="w-fit rounded bg-slate-700 px-3 py-2 text-white" on:click={importTemplateItem}
+          >Import Template</button>
+        <button
+          class="w-fit rounded bg-slate-600 px-3 py-2 text-white"
+          on:click={exportSelectedTemplate}
+          >Export Selected</button>
+        <select class="rounded border border-slate-300 p-2" bind:value={selectedTemplateId}>
+          <option value="">Select template</option>
+          {#each templates as template}
+            {@const tpl = asTemplate(template)}
+            <option value={tpl.id}>{tpl.name} ({tpl.version})</option>
+          {/each}
+        </select>
+        {#if exportedTemplateJson}
+          <textarea class="rounded border border-slate-300 p-2" readonly value={exportedTemplateJson}></textarea>
+        {/if}
+      </div>
+    </section>
+
     <section class="rounded-xl border border-slate-200 bg-white/90 p-6 shadow-sm">
       <h2 class="text-lg font-semibold">Run</h2>
       <div class="mt-3 grid gap-2 text-sm text-slate-700">

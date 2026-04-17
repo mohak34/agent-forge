@@ -7,6 +7,7 @@ from app.database import Base, engine, get_db
 from app.memory import get_recent_memory, store_memory
 from app.orchestrator import execute_task_graph
 from app.models import (
+    AgentTemplate,
     ApprovalRequest,
     ApprovalStatus,
     MemoryItem,
@@ -17,10 +18,14 @@ from app.models import (
 )
 from app.planner import build_task_plan
 from app.schemas import (
+    AgentTemplateCreate,
+    AgentTemplateImport,
+    AgentTemplateResponse,
     ApprovalDecisionRequest,
     ApprovalRequestResponse,
     GoalCreate,
     MemoryItemResponse,
+    RunFromTemplateRequest,
     RunResponse,
     TaskNodeResponse,
     ToolResponse,
@@ -86,6 +91,18 @@ def goal_requires_approval(goal: str) -> tuple[bool, str]:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def parse_template_json(config_json: str) -> dict:
+    import json
+
+    try:
+        parsed = json.loads(config_json or "{}")
+        if isinstance(parsed, dict):
+            return parsed
+        return {}
+    except Exception:
+        return {}
 
 
 @app.post(f"{settings.api_prefix}/goals", response_model=RunResponse)
@@ -182,6 +199,87 @@ async def create_goal(payload: GoalCreate, db: Session = Depends(get_db)) -> Run
     db.commit()
     db.refresh(run)
     return run
+
+
+@app.get(f"{settings.api_prefix}/agents", response_model=list[AgentTemplateResponse])
+def list_templates(db: Session = Depends(get_db)) -> list[AgentTemplate]:
+    return db.query(AgentTemplate).order_by(AgentTemplate.created_at.desc()).all()
+
+
+@app.post(f"{settings.api_prefix}/agents", response_model=AgentTemplateResponse)
+def create_template(payload: AgentTemplateCreate, db: Session = Depends(get_db)) -> AgentTemplate:
+    existing = db.query(AgentTemplate).filter(AgentTemplate.name == payload.name).first()
+    if existing is not None:
+        raise HTTPException(status_code=400, detail="Template with this name already exists")
+    template = AgentTemplate(
+        name=payload.name,
+        description=payload.description,
+        version=payload.version,
+        config_json=payload.config_json,
+        is_builtin=False,
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@app.post(f"{settings.api_prefix}/agents/import", response_model=AgentTemplateResponse)
+def import_template(payload: AgentTemplateImport, db: Session = Depends(get_db)) -> AgentTemplate:
+    existing = db.query(AgentTemplate).filter(AgentTemplate.name == payload.name).first()
+    if existing is not None:
+        raise HTTPException(status_code=400, detail="Template with this name already exists")
+    template = AgentTemplate(
+        name=payload.name,
+        description=payload.description,
+        version=payload.version,
+        config_json=payload.config_json,
+        is_builtin=False,
+    )
+    db.add(template)
+    db.commit()
+    db.refresh(template)
+    return template
+
+
+@app.get(f"{settings.api_prefix}/agents/{{template_id}}", response_model=AgentTemplateResponse)
+def get_template(template_id: str, db: Session = Depends(get_db)) -> AgentTemplate:
+    template = db.get(AgentTemplate, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return template
+
+
+@app.get(f"{settings.api_prefix}/agents/{{template_id}}/export")
+def export_template(template_id: str, db: Session = Depends(get_db)) -> dict:
+    template = db.get(AgentTemplate, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {
+        "name": template.name,
+        "description": template.description,
+        "version": template.version,
+        "config_json": template.config_json,
+    }
+
+
+@app.post(f"{settings.api_prefix}/agents/{{template_id}}/run", response_model=RunResponse)
+async def run_with_template(
+    template_id: str,
+    payload: RunFromTemplateRequest,
+    db: Session = Depends(get_db),
+) -> Run:
+    template = db.get(AgentTemplate, template_id)
+    if template is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+    config = parse_template_json(template.config_json)
+    goal_prefix = config.get("goal_prefix", "")
+    final_goal = f"{goal_prefix}\n{payload.goal}".strip() if goal_prefix else payload.goal
+    return await create_goal(
+        GoalCreate(goal=final_goal, memory_enabled=payload.memory_enabled),
+        db,
+    )
 
 
 @app.get(f"{settings.api_prefix}/runs/{{run_id}}", response_model=RunResponse)

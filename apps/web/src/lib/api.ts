@@ -78,3 +78,85 @@ export async function listMemory() {
   }
   return response.json();
 }
+
+export async function listTemplates() {
+  const response = await fetch(`${API_BASE}/agents`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch templates");
+  }
+  return response.json();
+}
+
+export async function createTemplate(
+  name: string,
+  description: string,
+  version: string,
+  configJson: string
+) {
+  const response = await fetch(`${API_BASE}/agents`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name,
+      description,
+      version,
+      config_json: configJson
+    })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to create template");
+  }
+  return response.json();
+}
+
+export async function runFromTemplate(
+  templateId: string,
+  goal: string,
+  memoryEnabled = false
+) {
+  const response = await fetch(`${API_BASE}/agents/${templateId}/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ goal, memory_enabled: memoryEnabled })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to run from template");
+  }
+  return response.json();
+}
+
+export async function exportTemplate(templateId: string) {
+  const response = await fetch(`${API_BASE}/agents/${templateId}/export`);
+  if (!response.ok) {
+    throw new Error("Failed to export template");
+  }
+  return response.json();
+}
+
+export async function importTemplate(
+  name: string,
+  description: string,
+  version: string,
+  configJson: string
+) {
+  const response = await fetch(`${API_BASE}/agents/import`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name,
+      description,
+      version,
+      config_json: configJson
+    })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to import template");
+  }
+  return response.json();
+}

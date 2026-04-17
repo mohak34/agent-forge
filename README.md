@@ -12,6 +12,7 @@ agent-forge is a modular multi-agent orchestration platform with a SvelteKit fro
 - Phase F baseline implemented: human-in-the-loop approval queue and approve/reject decision flow.
 - Phase G baseline implemented: opt-in persistent memory retrieval/store across runs.
 - Phase H baseline implemented: rule-based model routing with budget checks and fallback logic.
+- Phase I baseline implemented: Agent Registry templates with save/import/export and run-with-template.
 
 ## Stack
 
@@ -98,6 +99,22 @@ agent-forge is a modular multi-agent orchestration platform with a SvelteKit fro
   - `model.fallback`
   - `budget.exceeded`
 - Automatic fallback to local model route when budget is tight
+
+## Phase I includes
+
+- Agent template registry model with versioned config payloads
+- Template endpoints:
+  - `GET /api/v0/agents`
+  - `POST /api/v0/agents`
+  - `POST /api/v0/agents/import`
+  - `GET /api/v0/agents/{template_id}`
+  - `GET /api/v0/agents/{template_id}/export`
+  - `POST /api/v0/agents/{template_id}/run`
+- Dashboard Agent Registry panel:
+  - create template
+  - import template
+  - export selected template
+  - run goal with selected template
 
 ## Repository layout
 

@@ -93,3 +93,35 @@ class MemoryItemResponse(BaseModel):
     kind: str
     content: str
     created_at: datetime
+
+
+class AgentTemplateCreate(BaseModel):
+    name: str
+    description: str = ""
+    version: str = "1.0.0"
+    config_json: str = "{}"
+
+
+class AgentTemplateImport(BaseModel):
+    name: str
+    description: str = ""
+    version: str = "1.0.0"
+    config_json: str
+
+
+class AgentTemplateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str
+    version: str
+    config_json: str
+    is_builtin: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+
+class RunFromTemplateRequest(BaseModel):
+    goal: str
+    memory_enabled: bool = False
