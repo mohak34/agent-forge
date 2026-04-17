@@ -9,22 +9,24 @@
 	} = $props<{
 		children: import("svelte").Snippet;
 		class?: string;
-		variant?: "default" | "success" | "warning" | "destructive" | "outline";
+		variant?: "default" | "secondary" | "success" | "warning" | "destructive" | "outline";
 		[key: string]: any;
 	}>();
 
 	const variants: Record<string, string> = {
-		default: "bg-zinc-800 text-zinc-100 border-zinc-700",
-		success: "border-emerald-500/50 bg-emerald-500/10 text-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.15)]",
-		warning: "border-neon-amber/50 bg-neon-amber/10 text-neon-amber shadow-[0_0_8px_rgba(255,191,0,0.15)]",
-		destructive: "border-neon-crimson/50 bg-neon-crimson/10 text-neon-crimson shadow-[0_0_8px_rgba(255,0,60,0.15)]",
-		outline: "text-zinc-400 border-zinc-800",
+		default: "bg-primary text-primary-foreground",
+		secondary: "bg-secondary text-secondary-foreground",
+		success: "bg-emerald-500/15 text-emerald-500",
+		warning: "bg-amber-500/15 text-amber-500",
+		destructive: "bg-red-500/15 text-red-500",
+		outline: "text-muted-foreground border border-border",
 	};
 </script>
 
 <div
 	class={cn(
-		"inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2",
+		"inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2",
+		variant === "outline" ? "" : "border border-transparent",
 		variants[variant],
 		className
 	)}

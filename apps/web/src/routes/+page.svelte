@@ -1,20 +1,16 @@
 <script lang="ts">
-	import { onMount } from "svelte";
+	import { onMount, tick } from "svelte";
 	import {
 		createRun,
-		createTemplate,
 		decideApproval,
-		exportTemplate,
 		getRun,
 		getRunTasks,
 		getRunTimeline,
-		getTools,
-		importTemplate,
 		listApprovals,
-		listMemory,
 		listTemplates,
-		runFromTemplate
 	} from "$lib/api";
+
+	import { cn } from "$lib/utils";
 
 	import Badge from "$lib/components/Badge.svelte";
 	import Button from "$lib/components/Button.svelte";
@@ -25,7 +21,7 @@
 
 	// -- State --
 	let mode = $state<"simple" | "power">("power");
-	let goal = $state("Create an implementation checklist for shipping a safe research assistant MVP in two weeks.");
+	let goal = $state("");
 	let loading = $state(false);
 	let error = $state("");
 	let runId = $state<string | null>(null);
@@ -38,6 +34,11 @@
 	let templates = $state<any[]>([]);
 	let memoryEnabled = $state(false);
 	let selectedTemplateId = $state("");
+	let isRightSidebarOpen = $state(false);
+	let activeTab = $state<"overview" | "graph" | "traceability">("overview");
+
+	// Auto-scroll chat feed
+	let chatFeedRef = $state<HTMLElement | null>(null);
 
 	// Polling state
 	let approvalPollId: ReturnType<typeof setInterval> | null = null;
@@ -53,6 +54,7 @@
 		tasks = await getRunTasks(id);
 		approvals = await listApprovals();
 		updateApprovalPolling();
+		scrollToBottom();
 	}
 
 	async function submitGoal() {
@@ -66,10 +68,12 @@
 			const createdRun = await createRun(goal, memoryEnabled);
 			runId = createdRun.id;
 			await refreshRunState(createdRun.id);
+			if (mode === "power") isRightSidebarOpen = true;
 		} catch (e: any) {
 			error = e.message || "Unknown error";
 		} finally {
 			loading = false;
+			goal = "";
 		}
 	}
 
@@ -106,11 +110,19 @@
 					timeline = await getRunTimeline(runId);
 					tasks = await getRunTasks(runId);
 					stopApprovalPolling();
+					scrollToBottom();
 				}
 			} catch {
 				stopApprovalPolling();
 			}
 		}, 5000);
+	}
+
+	async function scrollToBottom() {
+		await tick();
+		if (chatFeedRef) {
+			chatFeedRef.scrollTop = chatFeedRef.scrollHeight;
+		}
 	}
 
 	onMount(() => {
@@ -120,214 +132,307 @@
 		});
 		listApprovals().then(res => approvals = res);
 
-		return () => {
-			stopApprovalPolling();
-		};
+		return () => stopApprovalPolling();
 	});
 
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === "Enter" && !e.shiftKey) {
+			e.preventDefault();
+			submitGoal();
+		}
+	}
 </script>
 
 <svelte:head>
-	<title>Agent-Forge Workbench</title>
+	<title>Agent-Forge</title>
 </svelte:head>
 
-<div class="flex h-screen w-full flex-col bg-background text-foreground overflow-hidden font-sans selection:bg-neon-cyan/30">
+<div class="flex h-screen w-full flex-col bg-background text-foreground font-sans antialiased">
 	<!-- Topbar -->
-	<header class="flex h-14 shrink-0 items-center justify-between border-b border-border bg-zinc-950/50 px-6 backdrop-blur-md">
-		<div class="flex items-center gap-4">
-			<div class="h-4 w-4 bg-neon-cyan [clip-path:polygon(50%_0%,100%_25%,100%_75%,50%_100%,0%_75%,0%_25%)] shadow-[0_0_10px_#0ff]"></div>
-			<h1 class="text-sm font-bold tracking-[0.25em] text-zinc-100">AGENT-FORGE <span class="text-neon-cyan">OS</span></h1>
+	<header class="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6">
+		<div class="flex items-center gap-3">
+			<div class="flex h-6 w-6 items-center justify-center rounded-md bg-foreground">
+				<span class="font-mono text-xs font-bold text-background">AF</span>
+			</div>
+			<h1 class="text-sm font-semibold tracking-wide text-foreground">agent-forge</h1>
 		</div>
 		
-		<div class="flex items-center gap-6">
+		<div class="flex items-center gap-4">
 			{#if run}
-				<div class="flex items-center gap-4 text-xs font-mono">
+				<div class="hidden lg:flex items-center gap-4 text-xs font-mono">
 					<div class="flex flex-col text-right">
-						<span class="text-zinc-500">BUDGET USED</span>
-						<span class="text-neon-cyan font-bold">${run.budget_used_usd.toFixed(4)}</span>
+						<span class="text-muted-foreground">BUDGET</span>
+						<span class="text-foreground font-medium">${run.budget_used_usd.toFixed(4)}</span>
 					</div>
-					<div class="h-6 w-px bg-zinc-800"></div>
+					<div class="h-6 w-px bg-border"></div>
 					<div class="flex flex-col text-right">
-						<span class="text-zinc-500">TOKENS</span>
-						<span class="text-zinc-300">{run.token_estimate}</span>
+						<span class="text-muted-foreground">TOKENS</span>
+						<span class="text-foreground font-medium">{run.token_estimate}</span>
 					</div>
 				</div>
 			{/if}
-			<div class="h-6 w-px bg-zinc-800"></div>
-			<div class="flex rounded-md border border-zinc-800 bg-zinc-900 p-1 text-xs">
+			
+			<div class="flex rounded-md border border-border bg-card p-0.5 text-xs font-medium shadow-sm">
 				<button
-					class={`rounded px-3 py-1 transition-colors ${mode === "simple" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
-					onclick={() => mode = "simple"}
+					class={`rounded-sm px-3 py-1 transition-colors ${mode === "simple" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+					onclick={() => { mode = "simple"; isRightSidebarOpen = false; }}
 				>Simple</button>
 				<button
-					class={`rounded px-3 py-1 transition-colors ${mode === "power" ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}
+					class={`rounded-sm px-3 py-1 transition-colors ${mode === "power" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
 					onclick={() => mode = "power"}
 				>Power</button>
 			</div>
+
+			<Button variant="outline" size="sm" class="lg:hidden" onclick={() => isRightSidebarOpen = !isRightSidebarOpen}>
+				Menu
+			</Button>
 		</div>
 	</header>
 
-	<div class="flex flex-1 overflow-hidden">
-		<!-- Sidebar (Optional config/templates) -->
-		<aside class="w-64 border-r border-border bg-zinc-950/30 p-4 flex flex-col gap-6 overflow-y-auto">
-			<div class="space-y-3">
-				<h3 class="text-xs font-bold tracking-widest text-zinc-500 uppercase">Initialization</h3>
-				<select
-					class="w-full rounded border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-300 focus:border-neon-cyan focus:outline-none focus:ring-1 focus:ring-neon-cyan"
-					bind:value={selectedTemplateId}
-				>
-					<option value="">Standard Mode</option>
-					{#each templates as t}
-						<option value={t.id}>{t.name} (v{t.version})</option>
-					{/each}
-				</select>
-				
-				<label class="flex items-center gap-3 rounded border border-zinc-800 bg-zinc-900/50 p-3 hover:bg-zinc-900 transition-colors cursor-pointer group">
-					<div class="relative flex h-4 w-4 items-center justify-center rounded border border-zinc-600 bg-zinc-950 group-hover:border-neon-cyan transition-colors">
-						{#if memoryEnabled}
-							<div class="h-2 w-2 rounded-sm bg-neon-cyan shadow-[0_0_5px_#0ff]"></div>
-						{/if}
-						<input type="checkbox" class="absolute inset-0 opacity-0 cursor-pointer" bind:checked={memoryEnabled} />
-					</div>
-					<span class="text-xs font-medium text-zinc-300 group-hover:text-neon-cyan transition-colors">PERSISTENT MEMORY</span>
-				</label>
-			</div>
-
-			<div class="space-y-3">
-				<h3 class="text-xs font-bold tracking-widest text-zinc-500 uppercase">System Status</h3>
-				<div class="flex items-center justify-between rounded border border-emerald-900/30 bg-emerald-950/10 px-3 py-2">
-					<span class="text-xs font-mono text-zinc-400">CORE</span>
-					<Badge variant="success" class="text-[10px] h-5">ONLINE</Badge>
-				</div>
-				<div class="flex items-center justify-between rounded border border-zinc-800 bg-zinc-900/20 px-3 py-2">
-					<span class="text-xs font-mono text-zinc-400">POLICY ENG</span>
-					<Badge variant="default" class="text-[10px] h-5">ACTIVE</Badge>
-				</div>
-			</div>
-		</aside>
-
-		<!-- Main Workspace -->
-		<main class="flex-1 flex flex-col bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:24px_24px]">
+	<div class="flex flex-1 overflow-hidden relative">
+		<!-- Main Chat Area -->
+		<main class="flex-1 flex flex-col relative transition-all duration-300">
 			
-			<!-- Input Area -->
-			<div class="border-b border-border bg-zinc-950/80 p-6 backdrop-blur-sm">
-				<div class="mx-auto max-w-4xl space-y-4">
-					{#if error}
-						<div class="rounded border border-neon-crimson/50 bg-neon-crimson/10 px-4 py-3 text-sm text-neon-crimson font-mono">
-							[ERROR]: {error}
-						</div>
-					{/if}
-
-					<div class="relative group">
-						<div class="absolute -inset-0.5 rounded bg-gradient-to-r from-neon-cyan/20 to-zinc-800 opacity-20 blur transition duration-500 group-focus-within:opacity-100"></div>
-						<textarea
-							bind:value={goal}
-							class="relative w-full min-h-[100px] resize-none rounded bg-zinc-950 px-4 py-3 font-mono text-sm text-zinc-100 placeholder-zinc-700 outline-none border border-zinc-800 focus:border-neon-cyan transition-colors"
-							placeholder="> Define operational parameters or high-level goal..."
-						></textarea>
-						
-						<div class="absolute bottom-3 right-3">
-							<Button variant={loading ? "outline" : "neon"} size="sm" onclick={submitGoal} disabled={loading}>
-								{loading ? 'EXECUTING...' : 'INITIATE RUN'}
-							</Button>
-						</div>
-					</div>
+			{#if error}
+				<div class="m-4 rounded-md border border-red-500/50 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+					{error}
 				</div>
-			</div>
+			{/if}
 
-			<!-- Dynamic Dashboard Grid -->
-			<div class="flex-1 overflow-hidden p-6">
-				<div class="mx-auto h-full max-w-7xl grid grid-cols-1 lg:grid-cols-2 gap-6">
-					
-					<!-- Left Column: Task Graph -->
-					<Card class="flex flex-col overflow-hidden border-zinc-800/50 bg-zinc-950/50 backdrop-blur">
-						<div class="border-b border-zinc-800 px-4 py-3 flex justify-between items-center bg-zinc-900/50">
-							<h3 class="text-xs font-bold tracking-widest text-zinc-400 uppercase">Orchestration Graph</h3>
-							{#if run}
-								<Badge variant={run.status === 'completed' ? 'success' : run.status === 'failed' ? 'destructive' : 'default'} class="uppercase">{run.status}</Badge>
-							{/if}
-						</div>
-						<div class="flex-1 overflow-y-auto p-4 space-y-4">
-							{#if tasks.length === 0}
-								<div class="flex h-full items-center justify-center text-xs font-mono text-zinc-600">
-									[ Awaiting task definitions ]
-								</div>
-							{:else}
-								{#each tasks as task, i}
-									<TaskGraphNode {task} active={task.status === 'running'} />
-									{#if i < tasks.length - 1}
-										<div class="ml-8 h-4 w-[1px] bg-zinc-800"></div>
-									{/if}
-								{/each}
-							{/if}
-						</div>
-					</Card>
-
-					<!-- Right Column: Timeline & Approvals -->
-					<div class="flex flex-col gap-6 overflow-hidden">
-						
-						<!-- Action Center (Approvals) -->
-						{#if isWaitingApproval || latestRunApprovals.length > 0}
-							<Card class="border-neon-amber/30 bg-zinc-950/80 shadow-[0_0_30px_rgba(255,191,0,0.05)] shrink-0 max-h-[50%] overflow-y-auto">
-								<div class="border-b border-neon-amber/20 px-4 py-3 bg-neon-amber/5 flex items-center gap-2">
-									<div class="h-2 w-2 rounded-full bg-neon-amber animate-pulse"></div>
-									<h3 class="text-xs font-bold tracking-widest text-neon-amber uppercase">Action Center</h3>
-								</div>
-								<div class="p-4 space-y-4">
-									{#each latestRunApprovals as approval}
-										{#if approval.status === 'pending'}
-											<ApprovalGateCard {approval} onDecide={decide} />
-										{:else}
-											<div class="flex justify-between items-center rounded border border-zinc-800 bg-zinc-900 p-3 text-sm">
-												<span class="text-zinc-400">Action: {approval.action_type}</span>
-												<Badge variant={approval.status === 'approved' ? 'success' : 'destructive'}>{approval.status}</Badge>
-											</div>
-										{/if}
-									{/each}
-								</div>
-							</Card>
-						{/if}
-
-						<!-- Traceability Timeline -->
-						<Card class="flex-1 flex flex-col overflow-hidden border-zinc-800/50 bg-zinc-950/50 backdrop-blur min-h-[300px]">
-							<div class="border-b border-zinc-800 px-4 py-3 flex justify-between items-center bg-zinc-900/50">
-								<h3 class="text-xs font-bold tracking-widest text-zinc-400 uppercase">System Traceability</h3>
-								<span class="text-[10px] font-mono text-zinc-500">STREAMING...</span>
+			<!-- Chat Feed -->
+			<div class="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth" bind:this={chatFeedRef}>
+				<div class="mx-auto max-w-3xl space-y-8 pb-8">
+					{#if !run}
+						<div class="flex h-[50vh] flex-col items-center justify-center text-center space-y-4 opacity-50">
+							<div class="flex h-12 w-12 items-center justify-center rounded-xl bg-card border border-border">
+								<span class="font-mono text-xl font-bold">AF</span>
 							</div>
-							<div class="flex-1 overflow-y-auto p-6 bg-zinc-950">
-								{#if timeline.length === 0}
-									<div class="flex h-full items-center justify-center text-xs font-mono text-zinc-600">
-										[ Log stream empty ]
+							<div>
+								<h2 class="text-lg font-medium text-foreground">Welcome to Agent-Forge</h2>
+								<p class="text-sm text-muted-foreground mt-1 max-w-sm">Describe your research goal below, and our agent swarm will handle the rest.</p>
+							</div>
+						</div>
+					{:else}
+						<!-- User Goal Message -->
+						<div class="flex gap-4">
+							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary border border-border text-xs font-medium">U</div>
+							<div class="space-y-2 mt-1 flex-1">
+								<p class="text-[15px] font-medium text-foreground leading-relaxed">
+									{run.goal}
+								</p>
+								<div class="flex gap-2">
+									<Badge variant="outline" class="text-[10px] font-mono">ID: {run.id.slice(0, 8)}</Badge>
+									<Badge variant={run.status === 'completed' ? 'success' : run.status === 'failed' ? 'destructive' : run.status === 'waiting_approval' ? 'warning' : 'default'} class="text-[10px] uppercase">
+										{run.status}
+									</Badge>
+								</div>
+							</div>
+						</div>
+
+						<!-- Agent Processing/Output Message -->
+						<div class="flex gap-4">
+							<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground font-bold text-xs">AF</div>
+							<div class="mt-1 flex-1 min-w-0">
+								{#if run.status === "queued" || run.status === "running"}
+									<div class="flex items-center gap-3 text-muted-foreground text-sm">
+										<div class="flex gap-1">
+											<div class="h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce" style="animation-delay: 0ms"></div>
+											<div class="h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce" style="animation-delay: 150ms"></div>
+											<div class="h-1.5 w-1.5 rounded-full bg-zinc-500 animate-bounce" style="animation-delay: 300ms"></div>
+										</div>
+										Orchestrating agents...
 									</div>
-								{:else}
-									<div class="space-y-0">
-										{#each timeline as event}
-											<AgentTimelineItem {event} />
-										{/each}
+								{:else if run.status === "waiting_approval"}
+									<div class="rounded-md border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-500/90">
+										<p class="font-medium">Action Required</p>
+										<p class="mt-1 opacity-90">The agent encountered a policy check that requires human approval. Please check the action center.</p>
+										{#if !isRightSidebarOpen}
+											<Button variant="outline" size="sm" class="mt-3 bg-background" onclick={() => isRightSidebarOpen = true}>View Approvals</Button>
+										{/if}
+									</div>
+								{:else if run.status === "completed"}
+									<div class="prose prose-invert prose-sm max-w-none text-[15px] leading-relaxed text-zinc-300">
+										{#if run.output_text}
+											<p class="whitespace-pre-wrap">{run.output_text}</p>
+										{:else}
+											<p class="italic text-muted-foreground">Run completed with no final output.</p>
+										{/if}
+									</div>
+								{:else if run.status === "failed"}
+									<div class="rounded-md border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500/90">
+										<p class="font-medium">Execution Failed</p>
+										<p class="mt-1 opacity-90">{run.output_text || "The agent encountered an unrecoverable error."}</p>
 									</div>
 								{/if}
 							</div>
-						</Card>
+						</div>
+					{/if}
+				</div>
+			</div>
 
+			<!-- Input Area -->
+			<div class="p-4 lg:p-6 bg-gradient-to-t from-background via-background/95 to-transparent">
+				<div class="mx-auto max-w-3xl relative">
+					<div class="relative flex items-end rounded-xl border border-border bg-card shadow-sm focus-within:ring-1 focus-within:ring-zinc-600 transition-shadow">
+						<textarea
+							bind:value={goal}
+							onkeydown={handleKeydown}
+							class="max-h-[200px] min-h-[60px] w-full resize-none bg-transparent px-4 py-4 text-[15px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+							placeholder="Type your high-level goal... (Shift+Enter for newline)"
+							disabled={loading}
+						></textarea>
+						
+						<div class="flex items-center gap-2 p-3 pb-3 shrink-0">
+							{#if mode === "power" && !run}
+								<select
+									class="max-w-[120px] rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground focus:outline-none hidden sm:block"
+									bind:value={selectedTemplateId}
+								>
+									<option value="">Standard</option>
+									{#each templates as t}
+										<option value={t.id}>{t.name}</option>
+									{/each}
+								</select>
+							{/if}
+
+							<Button 
+								variant={loading || !goal.trim() ? "secondary" : "default"} 
+								size="icon" 
+								class="h-8 w-8 rounded-lg" 
+								onclick={submitGoal} 
+								disabled={loading || !goal.trim()}
+							>
+								{#if loading}
+									<span class="h-3 w-3 rounded-sm bg-current animate-pulse"></span>
+								{:else}
+									<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+								{/if}
+							</Button>
+						</div>
+					</div>
+					<div class="mt-2 text-center text-xs text-muted-foreground flex items-center justify-center gap-4">
+						<span>Press <kbd class="rounded border border-border bg-secondary px-1 font-mono text-[10px]">Enter</kbd> to submit</span>
+						{#if mode === "simple"}
+							<button class="hover:text-foreground hover:underline transition-colors" onclick={() => isRightSidebarOpen = !isRightSidebarOpen}>
+								Toggle Sidebar
+							</button>
+						{/if}
 					</div>
 				</div>
 			</div>
 		</main>
+
+		<!-- Right Sidebar (Observability) -->
+		{#if isRightSidebarOpen}
+			<aside class="absolute inset-y-0 right-0 z-20 w-full flex flex-col border-l border-border bg-card shadow-xl transition-transform duration-300 sm:w-[380px] lg:static lg:z-0">
+				
+				<!-- Sidebar Header / Tabs -->
+				<div class="flex items-center justify-between border-b border-border p-2">
+					<div class="flex gap-1 p-1">
+						{#each ["overview", "graph", "traceability"] as tab}
+							<button
+								class={cn(
+									"rounded-md px-3 py-1.5 text-xs font-medium capitalize transition-colors",
+									activeTab === tab ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground"
+								)}
+								onclick={() => activeTab = tab as any}
+							>
+								{tab}
+							</button>
+						{/each}
+					</div>
+					<Button variant="ghost" size="icon" class="h-8 w-8 lg:hidden" onclick={() => isRightSidebarOpen = false}>
+						<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+					</Button>
+				</div>
+
+				<!-- Sidebar Content -->
+				<div class="flex-1 overflow-y-auto p-4">
+					
+					{#if activeTab === "overview"}
+						<div class="space-y-6">
+							<!-- Action Center (Approvals) -->
+							{#if isWaitingApproval || latestRunApprovals.length > 0}
+								<div class="space-y-3">
+									<h3 class="text-xs font-bold tracking-widest text-muted-foreground uppercase">Action Center</h3>
+									<div class="space-y-3">
+										{#each latestRunApprovals as approval}
+											{#if approval.status === 'pending'}
+												<ApprovalGateCard {approval} onDecide={decide} />
+											{:else}
+												<div class="flex justify-between items-center rounded-md border border-border bg-background p-3 text-sm">
+													<span class="text-muted-foreground">Action: {approval.action_type}</span>
+													<Badge variant={approval.status === 'approved' ? 'success' : 'destructive'}>{approval.status}</Badge>
+												</div>
+											{/if}
+										{/each}
+									</div>
+								</div>
+							{/if}
+
+							<div class="space-y-3">
+								<h3 class="text-xs font-bold tracking-widest text-muted-foreground uppercase">Run Details</h3>
+								{#if run}
+									<div class="rounded-lg border border-border bg-background p-4 text-sm space-y-3">
+										<div class="flex justify-between"><span class="text-muted-foreground">Status</span><Badge variant="outline">{run.status}</Badge></div>
+										<div class="flex justify-between"><span class="text-muted-foreground">Provider</span><span class="font-mono text-foreground">{run.provider || "auto"}</span></div>
+										<div class="flex justify-between"><span class="text-muted-foreground">Model</span><span class="font-mono text-foreground">{run.model || "auto"}</span></div>
+										<div class="flex justify-between"><span class="text-muted-foreground">Budget Limit</span><span class="font-mono text-foreground">${run.budget_limit_usd.toFixed(2)}</span></div>
+									</div>
+								{:else}
+									<p class="text-sm text-muted-foreground">No active run.</p>
+								{/if}
+							</div>
+						</div>
+
+					{:else if activeTab === "graph"}
+						<div class="space-y-4">
+							<h3 class="text-xs font-bold tracking-widest text-muted-foreground uppercase">Task Dependencies</h3>
+							{#if tasks.length === 0}
+								<p class="text-sm text-muted-foreground italic">No tasks planned yet.</p>
+							{:else}
+								<div class="space-y-4 relative">
+									{#each tasks as task, i}
+										<TaskGraphNode {task} active={task.status === 'running'} />
+										{#if i < tasks.length - 1}
+											<div class="ml-8 h-4 w-px bg-border"></div>
+										{/if}
+									{/each}
+								</div>
+							{/if}
+						</div>
+
+					{:else if activeTab === "traceability"}
+						<div class="space-y-4">
+							<h3 class="text-xs font-bold tracking-widest text-muted-foreground uppercase">System Event Log</h3>
+							{#if timeline.length === 0}
+								<p class="text-sm text-muted-foreground italic">No events recorded.</p>
+							{:else}
+								<div class="space-y-0 p-2">
+									{#each timeline as event}
+										<AgentTimelineItem {event} />
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			</aside>
+		{/if}
 	</div>
 </div>
 
 <style>
-	/* Custom scrollbar for deep dark aesthetic */
 	::-webkit-scrollbar {
-		width: 8px;
-		height: 8px;
+		width: 6px;
+		height: 6px;
 	}
 	::-webkit-scrollbar-track {
-		background: #09090b; 
+		background: transparent; 
 	}
 	::-webkit-scrollbar-thumb {
 		background: #27272a; 
-		border-radius: 4px;
+		border-radius: 3px;
 	}
 	::-webkit-scrollbar-thumb:hover {
 		background: #3f3f46; 

@@ -1,22 +1,48 @@
-@import "@fontsource/ibm-plex-sans";
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/600.css";
+@import "@fontsource/geist-sans/700.css";
+@import "@fontsource/geist-mono/400.css";
+@import "@fontsource/geist-mono/500.css";
+@import "@fontsource/geist-mono/600.css";
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
-  /* We will use a standard mono font fallback for now if IBM Plex Mono isn't installed */
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
-  --color-neon-cyan: #0ff;
-  --color-neon-amber: #ffbf00;
-  --color-neon-crimson: #ff003c;
-  
-  --color-background: var(--color-zinc-950);
+  /* Neutral palette */
+  --color-background: #09090b; /* zinc-950 */
   --color-foreground: #fafafa;
   
-  --color-card: var(--color-zinc-900);
+  --color-card: #18181b; /* zinc-900 */
   --color-card-foreground: #fafafa;
   
-  --color-border: var(--color-zinc-800);
+  --color-border: #27272a; /* zinc-800 */
+  
+  --color-primary: #fafafa;
+  --color-primary-foreground: #09090b;
+
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #fafafa;
+
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa; /* zinc-400 */
+  
+  --color-accent: #27272a;
+  --color-accent-foreground: #fafafa;
+
+  --color-destructive: #ef4444; /* red-500 */
+  --color-destructive-foreground: #fafafa;
+
+  --color-success: #10b981; /* emerald-500 */
+  --color-success-foreground: #fafafa;
+
+  --color-warning: #f59e0b; /* amber-500 */
+  --color-warning-foreground: #09090b;
+
+  --color-info: #3b82f6; /* blue-500 */
+  --color-info-foreground: #fafafa;
 }
 
 @layer base {

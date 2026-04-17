@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cn } from "$lib/utils";
+
 	let {
 		children,
 		class: className = "",
@@ -9,17 +10,17 @@
 	} = $props<{
 		children: import("svelte").Snippet;
 		class?: string;
-		variant?: "default" | "outline" | "ghost" | "destructive" | "neon";
+		variant?: "default" | "secondary" | "outline" | "ghost" | "destructive";
 		size?: "default" | "sm" | "lg" | "icon";
 		[key: string]: any;
 	}>();
 
 	const variants: Record<string, string> = {
-		default: "bg-zinc-800 text-zinc-100 hover:bg-zinc-700",
-		outline: "border border-zinc-700 bg-transparent hover:bg-zinc-800",
-		ghost: "hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100",
-		destructive: "bg-neon-crimson text-white hover:opacity-90 shadow-[0_0_10px_rgba(255,0,60,0.5)]",
-		neon: "bg-transparent border border-neon-cyan text-neon-cyan shadow-[0_0_10px_rgba(0,255,255,0.2)] hover:bg-neon-cyan hover:text-zinc-950",
+		default: "bg-primary text-primary-foreground hover:bg-primary/90",
+		secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+		outline: "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
+		ghost: "hover:bg-accent hover:text-accent-foreground text-muted-foreground",
+		destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
 	};
 
 	const sizes: Record<string, string> = {

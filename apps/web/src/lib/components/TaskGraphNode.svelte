@@ -23,25 +23,24 @@
 </script>
 
 <div class={cn(
-	"relative flex items-start gap-4 rounded-lg border bg-zinc-900/50 p-4 transition-all duration-300",
-	active ? "border-neon-cyan shadow-[0_0_15px_rgba(0,255,255,0.15)] bg-zinc-900" : "border-zinc-800"
+	"relative flex items-start gap-4 rounded-lg border bg-zinc-950 p-4 transition-all duration-300",
+	active ? "border-zinc-500 shadow-sm" : "border-border"
 )}>
 	<!-- Status Indicator Dot -->
-	<div class="mt-1 flex h-2 w-2 shrink-0 rounded-full bg-zinc-500 shadow-[0_0_5px_rgba(161,161,170,0.5)]"
-		class:bg-neon-cyan={task.status === "running"}
-		class:shadow-[0_0_8px_rgba(0,255,255,0.8)]={task.status === "running"}
+	<div class="mt-1 flex h-2 w-2 shrink-0 rounded-full bg-zinc-600"
+		class:bg-zinc-300={task.status === "running"}
 		class:bg-emerald-500={task.status === "completed"}
-		class:bg-neon-amber={task.status === "waiting_approval"}
-		class:bg-neon-crimson={task.status === "failed"}
+		class:bg-amber-500={task.status === "waiting_approval"}
+		class:bg-red-500={task.status === "failed"}
 	></div>
 
 	<div class="flex-1 space-y-2">
 		<div class="flex items-center justify-between">
-			<h4 class="text-sm font-medium text-zinc-100">{task.title}</h4>
+			<h4 class="text-sm font-medium text-foreground">{task.title}</h4>
 			<Badge variant={badgeVariant}>{task.status}</Badge>
 		</div>
 		
-		<div class="flex items-center gap-3 text-xs font-mono text-zinc-500">
+		<div class="flex items-center gap-3 text-xs font-mono text-muted-foreground">
 			<span>[{task.id.slice(0, 8)}]</span>
 			<span>kind: {task.kind}</span>
 			{#if task.depends_on}
@@ -50,7 +49,7 @@
 		</div>
 
 		{#if task.output_text && task.status === "completed"}
-			<div class="mt-2 rounded bg-zinc-950 p-2 text-xs text-zinc-300 font-mono line-clamp-2 border border-zinc-800/50">
+			<div class="mt-2 rounded-md bg-zinc-900 p-2.5 text-xs text-zinc-300 font-mono line-clamp-2 border border-border">
 				{task.output_text}
 			</div>
 		{/if}

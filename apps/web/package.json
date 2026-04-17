@@ -10,7 +10,6 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173"
   },
   "devDependencies": {
-    "@fontsource/ibm-plex-sans": "5.2.8",
     "@sveltejs/adapter-auto": "7.0.1",
     "@sveltejs/kit": "2.57.1",
     "@sveltejs/vite-plugin-svelte": "5.1.1",
@@ -22,6 +21,8 @@
     "vite": "6.3.5"
   },
   "dependencies": {
+    "@fontsource/geist-mono": "^5.2.7",
+    "@fontsource/geist-sans": "^5.2.5",
     "bits-ui": "^2.18.0",
     "clsx": "^2.1.1",
     "lucide-svelte": "^1.0.1",
