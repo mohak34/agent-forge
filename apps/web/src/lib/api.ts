@@ -1,4 +1,5 @@
-const API_BASE = "http://localhost:8000/api/v0";
+const API_BASE_ROOT = (import.meta.env.PUBLIC_API_BASE_URL || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = `${API_BASE_ROOT}/api/v0`;
 
 export async function createRun(goal: string, memoryEnabled = false) {
   const response = await fetch(`${API_BASE}/goals`, {
