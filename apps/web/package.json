@@ -20,5 +20,11 @@
     "tailwindcss": "4.2.2",
     "typescript": "6.0.2",
     "vite": "6.3.5"
+  },
+  "dependencies": {
+    "bits-ui": "^2.18.0",
+    "clsx": "^2.1.1",
+    "lucide-svelte": "^1.0.1",
+    "tailwind-merge": "^3.5.0"
   }
 }

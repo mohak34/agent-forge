@@ -1,13 +1,37 @@
 @import "@fontsource/ibm-plex-sans";
 @import "tailwindcss";
 
-:root {
-  color-scheme: light;
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  /* We will use a standard mono font fallback for now if IBM Plex Mono isn't installed */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --color-neon-cyan: #0ff;
+  --color-neon-amber: #ffbf00;
+  --color-neon-crimson: #ff003c;
+  
+  --color-background: var(--color-zinc-950);
+  --color-foreground: #fafafa;
+  
+  --color-card: var(--color-zinc-900);
+  --color-card-foreground: #fafafa;
+  
+  --color-border: var(--color-zinc-800);
 }
 
-body {
-  margin: 0;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
-  background: radial-gradient(circle at 20% 10%, #e4f1ff 0%, #f8fafc 35%, #ffffff 100%);
-  color: #0f172a;
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    margin: 0;
+  }
+
+  * {
+    border-color: var(--color-border);
+  }
 }
