@@ -34,9 +34,10 @@ services:
     depends_on:
       - postgres
       - redis
+    env_file:
+      - ./apps/api/.env
     environment:
       DATABASE_URL: postgresql+psycopg://agentforge:agentforge@postgres:5432/agentforge
-      MOCK_MODE: "true"
     ports:
       - "8000:8000"
 

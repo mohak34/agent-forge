@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from app.config import settings
+
 
 @dataclass
 class RouteDecision:
@@ -36,20 +38,20 @@ def route_for_task(task_kind: str, budget_remaining_usd: float) -> RouteDecision
 
     if kind == "planning":
         return RouteDecision(
-            provider="openrouter",
-            model="openai/gpt-4o-mini",
-            reason="Planning tasks need stronger reasoning",
+            provider="groq",
+            model=settings.groq_default_model,
+            reason="Planning routed to Groq for simpler single-provider setup",
         )
 
     if kind in {"research", "analysis"}:
         return RouteDecision(
             provider="groq",
-            model="llama-3.1-8b-instant",
+            model=settings.groq_default_model,
             reason="Research/analysis optimized for fast low-cost processing",
         )
 
     return RouteDecision(
         provider="groq",
-        model="llama-3.1-8b-instant",
+        model=settings.groq_default_model,
         reason="Default low-cost route",
     )

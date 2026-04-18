@@ -26,6 +26,7 @@ from app.schemas import (
     GoalCreate,
     MemoryItemResponse,
     RunFromTemplateRequest,
+    RunHistoryItemResponse,
     RunResponse,
     TaskNodeResponse,
     ToolResponse,
@@ -288,6 +289,12 @@ def get_run(run_id: str, db: Session = Depends(get_db)) -> Run:
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
+
+
+@app.get(f"{settings.api_prefix}/runs", response_model=list[RunHistoryItemResponse])
+def list_runs(limit: int = 50, db: Session = Depends(get_db)) -> list[Run]:
+    bounded_limit = max(1, min(limit, 200))
+    return db.query(Run).order_by(Run.created_at.desc()).limit(bounded_limit).all()
 
 
 @app.get(f"{settings.api_prefix}/runs/{{run_id}}/timeline", response_model=list[TraceEventResponse])

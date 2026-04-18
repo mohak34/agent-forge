@@ -33,6 +33,14 @@ export async function getRun(runId: string) {
   return response.json();
 }
 
+export async function listRuns(limit = 50) {
+  const response = await fetch(`${API_BASE}/runs?limit=${limit}`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch runs");
+  }
+  return response.json();
+}
+
 export async function getRunTasks(runId: string) {
   const response = await fetch(`${API_BASE}/runs/${runId}/tasks`);
   if (!response.ok) {

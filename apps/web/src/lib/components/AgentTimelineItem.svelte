@@ -1,5 +1,4 @@
 <script lang="ts">
-	import Badge from "./Badge.svelte";
 	import { cn } from "$lib/utils";
 
 	let {
@@ -19,32 +18,26 @@
 	let colorClass = $derived(statusColors[event.status] || "text-muted-foreground");
 </script>
 
-<div class="relative flex gap-4 pb-8 last:pb-0">
-	<!-- Connecting Line -->
-	<div class="absolute bottom-0 left-[11px] top-6 w-px bg-border last:hidden"></div>
-
-	<!-- Timeline Node -->
-	<div class={cn(
-		"relative z-10 mt-1.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border bg-background",
-		event.status === 'active' && "border-zinc-500"
-	)}>
-		<div class={cn("h-1.5 w-1.5 rounded-full", event.status === 'active' ? "bg-foreground" : "bg-zinc-600")}></div>
-	</div>
-
-	<!-- Content -->
-	<div class="flex-1 space-y-2">
+<div class="flex items-start gap-3 py-2 text-sm hover:bg-secondary/30 px-2 rounded -mx-2 transition-colors">
+	<!-- Time -->
+	<span class="text-[10px] font-mono text-zinc-500 shrink-0 w-16 pt-[2px]">
+		{new Date(event.created_at).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+	</span>
+	
+	<!-- Message -->
+	<div class="flex-1 min-w-0 break-words space-y-1">
 		<div class="flex items-center gap-2">
-			<span class={cn("text-sm font-medium tracking-wide", colorClass)}>
+			<span class={cn("font-mono text-[11px] font-medium leading-tight", colorClass)}>
 				{event.event_type}
 			</span>
-			<span class="text-xs font-mono text-muted-foreground">[{new Date(event.created_at).toLocaleTimeString()}]</span>
-			{#if event.actor}
-				<Badge variant="outline" class="ml-auto text-[10px] font-mono">{event.actor}</Badge>
-			{/if}
 		</div>
-
-		<p class="text-sm text-zinc-300 leading-relaxed">
+		<p class="text-[13px] text-zinc-300 leading-snug">
 			{event.detail}
 		</p>
 	</div>
+	
+	<!-- Actor -->
+	{#if event.actor}
+		<span class="text-[10px] font-mono uppercase text-muted-foreground shrink-0 pt-[2px]">{event.actor}</span>
+	{/if}
 </div>

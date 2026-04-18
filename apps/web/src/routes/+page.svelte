@@ -7,14 +7,16 @@
 		getRunTasks,
 		getRunTimeline,
 		listApprovals,
+		listRuns,
 		listTemplates,
+		runFromTemplate
 	} from "$lib/api";
 
 	import { cn } from "$lib/utils";
+	import { parseMarkdown } from "$lib/markdown";
 
 	import Badge from "$lib/components/Badge.svelte";
 	import Button from "$lib/components/Button.svelte";
-	import Card from "$lib/components/Card.svelte";
 	import TaskGraphNode from "$lib/components/TaskGraphNode.svelte";
 	import AgentTimelineItem from "$lib/components/AgentTimelineItem.svelte";
 	import ApprovalGateCard from "$lib/components/ApprovalGateCard.svelte";
@@ -25,6 +27,8 @@
 	let loading = $state(false);
 	let error = $state("");
 	let runId = $state<string | null>(null);
+	let historySidebarOpen = $state(true);
+	let runHistory = $state<any[]>([]);
 
 	// Complex objects
 	let run = $state<any>(null);
@@ -34,7 +38,7 @@
 	let templates = $state<any[]>([]);
 	let memoryEnabled = $state(false);
 	let selectedTemplateId = $state("");
-	let isRightSidebarOpen = $state(false);
+	let isRightSidebarOpen = $state(true);
 	let activeTab = $state<"overview" | "graph" | "traceability">("overview");
 
 	// Auto-scroll chat feed
@@ -53,8 +57,33 @@
 		timeline = await getRunTimeline(id);
 		tasks = await getRunTasks(id);
 		approvals = await listApprovals();
+		runHistory = await listRuns(75);
 		updateApprovalPolling();
 		scrollToBottom();
+	}
+
+	async function loadRunHistory() {
+		try {
+			runHistory = await listRuns(75);
+		} catch {
+			runHistory = [];
+		}
+	}
+
+	async function openRunFromHistory(id: string) {
+		error = "";
+		runId = id;
+		await refreshRunState(id);
+	}
+
+	function startNewChat() {
+		runId = null;
+		run = null;
+		timeline = [];
+		tasks = [];
+		error = "";
+		goal = "";
+		stopApprovalPolling();
 	}
 
 	async function submitGoal() {
@@ -65,9 +94,15 @@
 		tasks = [];
 
 		try {
-			const createdRun = await createRun(goal, memoryEnabled);
+			let createdRun;
+			if (selectedTemplateId) {
+				createdRun = await runFromTemplate(selectedTemplateId, goal, memoryEnabled);
+			} else {
+				createdRun = await createRun(goal, memoryEnabled);
+			}
 			runId = createdRun.id;
 			await refreshRunState(createdRun.id);
+			await loadRunHistory();
 			if (mode === "power") isRightSidebarOpen = true;
 		} catch (e: any) {
 			error = e.message || "Unknown error";
@@ -82,6 +117,7 @@
 			await decideApproval(id, decision, "manual decision from dashboard");
 			if (runId) {
 				await refreshRunState(runId);
+				await loadRunHistory();
 			} else {
 				approvals = await listApprovals();
 			}
@@ -131,6 +167,7 @@
 			if (res.length > 0) selectedTemplateId = res[0].id;
 		});
 		listApprovals().then(res => approvals = res);
+		loadRunHistory();
 
 		return () => stopApprovalPolling();
 	});
@@ -140,6 +177,13 @@
 			e.preventDefault();
 			submitGoal();
 		}
+	}
+
+	function summarizeGoal(text: string) {
+		const trimmed = (text || "").trim();
+		if (!trimmed) return "Untitled run";
+		if (trimmed.length <= 54) return trimmed;
+		return `${trimmed.slice(0, 54)}...`;
 	}
 </script>
 
@@ -151,6 +195,9 @@
 	<!-- Topbar -->
 	<header class="flex h-14 shrink-0 items-center justify-between border-b border-border bg-background px-4 lg:px-6">
 		<div class="flex items-center gap-3">
+			<Button variant="ghost" size="icon" class="h-8 w-8" onclick={() => historySidebarOpen = !historySidebarOpen}>
+				<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4"><path d="M3 6h18"/><path d="M3 12h18"/><path d="M3 18h18"/></svg>
+			</Button>
 			<div class="flex h-6 w-6 items-center justify-center rounded-md bg-foreground">
 				<span class="font-mono text-xs font-bold text-background">AF</span>
 			</div>
@@ -179,7 +226,7 @@
 				>Simple</button>
 				<button
 					class={`rounded-sm px-3 py-1 transition-colors ${mode === "power" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-					onclick={() => mode = "power"}
+					onclick={() => { mode = "power"; isRightSidebarOpen = true; }}
 				>Power</button>
 			</div>
 
@@ -190,6 +237,69 @@
 	</header>
 
 	<div class="flex flex-1 overflow-hidden relative">
+		{#if historySidebarOpen}
+			<aside class="hidden md:flex w-[280px] shrink-0 flex-col border-r border-border bg-card/40 transition-all duration-300">
+				<div class="border-b border-border p-3">
+					<Button variant="default" class="w-full justify-center" onclick={startNewChat}>New Chat</Button>
+				</div>
+				<div class="flex-1 overflow-y-auto p-3 space-y-2">
+					{#if runHistory.length === 0}
+						<p class="px-2 py-1 text-xs text-muted-foreground">No runs yet.</p>
+					{:else}
+						{#each runHistory as item}
+							<button
+								class={cn(
+									"w-full rounded-md border px-3 py-2 text-left transition-colors",
+									runId === item.id
+										? "border-zinc-500 bg-zinc-900/70"
+										: "border-border bg-background/50 hover:bg-secondary/40"
+								)}
+								onclick={() => openRunFromHistory(item.id)}
+							>
+								<div class="truncate text-sm font-medium text-foreground">{summarizeGoal(item.goal)}</div>
+								<div class="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+									<span class="uppercase">{item.status}</span>
+									<span>{new Date(item.created_at).toLocaleDateString()}</span>
+								</div>
+							</button>
+						{/each}
+					{/if}
+				</div>
+
+				<!-- Moved Configuration here in Power Mode -->
+				{#if mode === "power"}
+					<div class="border-t border-border p-4 space-y-6 bg-background/50 mt-auto">
+						<div class="space-y-3">
+							<h3 class="text-[10px] font-bold tracking-[0.15em] text-muted-foreground uppercase">Configuration</h3>
+							<div class="space-y-2">
+								<label for="template-select" class="text-xs text-muted-foreground block">Template</label>
+								<select
+									id="template-select"
+									class="w-full rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-zinc-600 transition-shadow"
+									bind:value={selectedTemplateId}
+								>
+									<option value="">Standard Base</option>
+									{#each templates as t}
+										<option value={t.id}>{t.name}</option>
+									{/each}
+								</select>
+							</div>
+
+							<label class="flex items-center gap-3 rounded-md border border-border bg-card p-3 hover:bg-secondary/50 transition-colors cursor-pointer group mt-2">
+								<div class="relative flex h-4 w-4 items-center justify-center rounded border border-border bg-background group-hover:border-zinc-500 transition-colors">
+									{#if memoryEnabled}
+										<div class="h-2 w-2 rounded-sm bg-foreground"></div>
+									{/if}
+									<input type="checkbox" class="absolute inset-0 opacity-0 cursor-pointer" bind:checked={memoryEnabled} />
+								</div>
+								<span class="text-xs font-medium text-foreground">Persistent Memory</span>
+							</label>
+						</div>
+					</div>
+				{/if}
+			</aside>
+		{/if}
+
 		<!-- Main Chat Area -->
 		<main class="flex-1 flex flex-col relative transition-all duration-300">
 			
@@ -250,15 +360,15 @@
 											<Button variant="outline" size="sm" class="mt-3 bg-background" onclick={() => isRightSidebarOpen = true}>View Approvals</Button>
 										{/if}
 									</div>
-								{:else if run.status === "completed"}
-									<div class="prose prose-invert prose-sm max-w-none text-[15px] leading-relaxed text-zinc-300">
-										{#if run.output_text}
-											<p class="whitespace-pre-wrap">{run.output_text}</p>
-										{:else}
-											<p class="italic text-muted-foreground">Run completed with no final output.</p>
-										{/if}
-									</div>
-								{:else if run.status === "failed"}
+									{:else if run.status === "completed"}
+										<div class="prose prose-invert prose-sm max-w-none text-[15px] leading-relaxed text-zinc-300">
+											{#if run.output_text}
+												<div class="whitespace-normal prose-table:block prose-table:overflow-x-auto prose-table:w-full">{@html parseMarkdown(run.output_text)}</div>
+											{:else}
+												<p class="italic text-muted-foreground">Run completed with no final output.</p>
+											{/if}
+										</div>
+									{:else if run.status === "failed"}
 									<div class="rounded-md border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500/90">
 										<p class="font-medium">Execution Failed</p>
 										<p class="mt-1 opacity-90">{run.output_text || "The agent encountered an unrecoverable error."}</p>
@@ -283,18 +393,6 @@
 						></textarea>
 						
 						<div class="flex items-center gap-2 p-3 pb-3 shrink-0">
-							{#if mode === "power" && !run}
-								<select
-									class="max-w-[120px] rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground focus:outline-none hidden sm:block"
-									bind:value={selectedTemplateId}
-								>
-									<option value="">Standard</option>
-									{#each templates as t}
-										<option value={t.id}>{t.name}</option>
-									{/each}
-								</select>
-							{/if}
-
 							<Button 
 								variant={loading || !goal.trim() ? "secondary" : "default"} 
 								size="icon" 
@@ -347,7 +445,7 @@
 				</div>
 
 				<!-- Sidebar Content -->
-				<div class="flex-1 overflow-y-auto p-4">
+				<div class="flex-1 overflow-y-auto overflow-x-hidden p-4">
 					
 					{#if activeTab === "overview"}
 						<div class="space-y-6">
@@ -391,12 +489,9 @@
 							{#if tasks.length === 0}
 								<p class="text-sm text-muted-foreground italic">No tasks planned yet.</p>
 							{:else}
-								<div class="space-y-4 relative">
+								<div class="relative">
 									{#each tasks as task, i}
 										<TaskGraphNode {task} active={task.status === 'running'} />
-										{#if i < tasks.length - 1}
-											<div class="ml-8 h-4 w-px bg-border"></div>
-										{/if}
 									{/each}
 								</div>
 							{/if}

@@ -28,6 +28,17 @@ class RunResponse(BaseModel):
     updated_at: datetime | None
 
 
+class RunHistoryItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    goal: str
+    status: RunStatus
+    memory_enabled: bool
+    created_at: datetime
+    updated_at: datetime | None
+
+
 class TraceEventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
