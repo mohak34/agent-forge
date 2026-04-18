@@ -2,6 +2,12 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+from app.bootstrap_migrations import run_bootstrap_migrations
+from app.chat_context import (
+    assemble_thread_goal,
+    build_summary_snapshot,
+    should_use_direct_mode,
+)
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.memory import get_recent_memory, store_memory
@@ -10,10 +16,13 @@ from app.models import (
     AgentTemplate,
     ApprovalRequest,
     ApprovalStatus,
+    ChatMessage,
+    ChatThread,
     MemoryItem,
     Run,
     RunStatus,
     TaskNode,
+    ThreadSummary,
     TraceEvent,
 )
 from app.planner import build_task_plan
@@ -23,6 +32,12 @@ from app.schemas import (
     AgentTemplateResponse,
     ApprovalDecisionRequest,
     ApprovalRequestResponse,
+    ChatMessageCreate,
+    ChatMessageResponse,
+    ChatThreadCreate,
+    ChatThreadDetailResponse,
+    ChatThreadResponse,
+    ChatTurnResponse,
     GoalCreate,
     MemoryItemResponse,
     RunFromTemplateRequest,
@@ -32,6 +47,7 @@ from app.schemas import (
     ToolResponse,
     TraceEventResponse,
 )
+from app.executor import run_single_agent
 from app.tools import list_tools
 
 app = FastAPI(title=settings.app_name)
@@ -48,6 +64,7 @@ app.add_middleware(
 @app.on_event("startup")
 def on_startup() -> None:
     Base.metadata.create_all(bind=engine)
+    run_bootstrap_migrations(engine)
 
 
 def create_event(
@@ -106,9 +123,34 @@ def parse_template_json(config_json: str) -> dict:
         return {}
 
 
-@app.post(f"{settings.api_prefix}/goals", response_model=RunResponse)
-async def create_goal(payload: GoalCreate, db: Session = Depends(get_db)) -> Run:
-    run = Run(goal=payload.goal, memory_enabled=payload.memory_enabled, status=RunStatus.QUEUED)
+def _recent_thread_messages(db: Session, thread_id: str, limit: int = 8) -> list[ChatMessage]:
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.thread_id == thread_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    messages.reverse()
+    return messages
+
+
+async def execute_run_for_goal(
+    db: Session,
+    goal: str,
+    memory_enabled: bool,
+    thread_id: str | None = None,
+    user_message_id: str | None = None,
+    turn_index: int = 0,
+) -> Run:
+    run = Run(
+        goal=goal,
+        memory_enabled=memory_enabled,
+        status=RunStatus.QUEUED,
+        thread_id=thread_id,
+        user_message_id=user_message_id,
+        turn_index=turn_index,
+    )
     db.add(run)
     db.flush()
 
@@ -121,14 +163,14 @@ async def create_goal(payload: GoalCreate, db: Session = Depends(get_db)) -> Run
     emit_plan_events(db, run.id, nodes)
 
     try:
-        needs_approval, approval_reason = goal_requires_approval(payload.goal)
+        needs_approval, approval_reason = goal_requires_approval(goal)
         if needs_approval:
             run.status = RunStatus.WAITING_APPROVAL
             request = ApprovalRequest(
                 run_id=run.id,
                 action_type="external_action",
                 reason=approval_reason,
-                payload=payload.goal,
+                payload=goal,
                 status=ApprovalStatus.PENDING,
             )
             db.add(request)
@@ -196,6 +238,64 @@ async def create_goal(payload: GoalCreate, db: Session = Depends(get_db)) -> Run
     except Exception as exc:
         run.status = RunStatus.FAILED
         create_event(db, run.id, "run.failed", str(exc), actor="executor")
+
+    return run
+
+
+async def execute_direct_turn(
+    db: Session,
+    goal: str,
+    memory_enabled: bool,
+    thread_id: str,
+    user_message_id: str,
+    turn_index: int,
+) -> Run:
+    run = Run(
+        goal=goal,
+        memory_enabled=memory_enabled,
+        status=RunStatus.RUNNING,
+        thread_id=thread_id,
+        user_message_id=user_message_id,
+        turn_index=turn_index,
+    )
+    db.add(run)
+    db.flush()
+
+    create_event(db, run.id, "run.created", "Direct chat turn accepted")
+    create_event(db, run.id, "run.started", "Direct turn entered running state")
+    create_event(
+        db, run.id, "chat.context.assembled", "Used thread summary + recent message window"
+    )
+
+    try:
+        result = await run_single_agent(goal, provider_override="groq")
+        run.provider = result["provider"]
+        run.model = result["model"]
+        run.output_text = result["text"]
+        run.token_estimate = estimate_tokens(result["text"])
+        create_event(
+            db,
+            run.id,
+            "run.output",
+            f"Final output preview: {run.output_text[:400]}",
+            actor="executor",
+        )
+        run.status = RunStatus.COMPLETED
+        create_event(db, run.id, "run.completed", "Direct run finished")
+    except Exception as exc:
+        run.status = RunStatus.FAILED
+        create_event(db, run.id, "run.failed", str(exc), actor="executor")
+
+    return run
+
+
+@app.post(f"{settings.api_prefix}/goals", response_model=RunResponse)
+async def create_goal(payload: GoalCreate, db: Session = Depends(get_db)) -> Run:
+    run = await execute_run_for_goal(
+        db=db,
+        goal=payload.goal,
+        memory_enabled=payload.memory_enabled,
+    )
 
     db.commit()
     db.refresh(run)
@@ -280,6 +380,175 @@ async def run_with_template(
     return await create_goal(
         GoalCreate(goal=final_goal, memory_enabled=payload.memory_enabled),
         db,
+    )
+
+
+@app.post(f"{settings.api_prefix}/chat/threads", response_model=ChatThreadResponse)
+def create_chat_thread(payload: ChatThreadCreate, db: Session = Depends(get_db)) -> ChatThread:
+    template_id = payload.template_id
+    if template_id:
+        template = db.get(AgentTemplate, template_id)
+        if template is None:
+            raise HTTPException(status_code=404, detail="Template not found")
+    thread = ChatThread(
+        title=payload.title.strip() or "New chat",
+        memory_enabled=payload.memory_enabled,
+        template_id=template_id,
+    )
+    db.add(thread)
+    db.commit()
+    db.refresh(thread)
+    return thread
+
+
+@app.get(f"{settings.api_prefix}/chat/threads", response_model=list[ChatThreadResponse])
+def list_chat_threads(limit: int = 50, db: Session = Depends(get_db)) -> list[ChatThread]:
+    bounded_limit = max(1, min(limit, 200))
+    return db.query(ChatThread).order_by(ChatThread.updated_at.desc()).limit(bounded_limit).all()
+
+
+@app.get(
+    f"{settings.api_prefix}/chat/threads/{{thread_id}}", response_model=ChatThreadDetailResponse
+)
+def get_chat_thread(thread_id: str, db: Session = Depends(get_db)) -> ChatThreadDetailResponse:
+    thread = db.get(ChatThread, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.thread_id == thread_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+    return ChatThreadDetailResponse(thread=thread, messages=messages)
+
+
+@app.get(
+    f"{settings.api_prefix}/chat/threads/{{thread_id}}/messages",
+    response_model=list[ChatMessageResponse],
+)
+def list_thread_messages(thread_id: str, db: Session = Depends(get_db)) -> list[ChatMessage]:
+    thread = db.get(ChatThread, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return (
+        db.query(ChatMessage)
+        .filter(ChatMessage.thread_id == thread_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+
+
+@app.post(
+    f"{settings.api_prefix}/chat/threads/{{thread_id}}/messages",
+    response_model=ChatTurnResponse,
+)
+async def send_thread_message(
+    thread_id: str,
+    payload: ChatMessageCreate,
+    db: Session = Depends(get_db),
+) -> ChatTurnResponse:
+    thread = db.get(ChatThread, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Message content is required")
+
+    previous_message = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.thread_id == thread_id)
+        .order_by(ChatMessage.turn_index.desc())
+        .first()
+    )
+    next_turn = (previous_message.turn_index + 1) if previous_message else 1
+
+    user_message = ChatMessage(
+        thread_id=thread_id,
+        role="user",
+        content=content,
+        turn_index=next_turn,
+    )
+    db.add(user_message)
+    db.flush()
+
+    summary = db.query(ThreadSummary).filter(ThreadSummary.thread_id == thread_id).first()
+    recent = _recent_thread_messages(db, thread_id, limit=8)
+    assembled_goal = assemble_thread_goal(content, summary.summary_text if summary else "", recent)
+
+    direct_mode = payload.route_mode == "direct" or (
+        payload.route_mode == "auto" and should_use_direct_mode(content)
+    )
+
+    run: Run
+    if direct_mode:
+        run = await execute_direct_turn(
+            db=db,
+            goal=assembled_goal,
+            memory_enabled=thread.memory_enabled,
+            thread_id=thread_id,
+            user_message_id=user_message.id,
+            turn_index=next_turn,
+        )
+    else:
+        run = await execute_run_for_goal(
+            db=db,
+            goal=assembled_goal,
+            memory_enabled=thread.memory_enabled,
+            thread_id=thread_id,
+            user_message_id=user_message.id,
+            turn_index=next_turn,
+        )
+        create_event(
+            db,
+            run.id,
+            "chat.context.assembled",
+            "Used thread summary + recent message window",
+            actor="orchestrator",
+        )
+
+    assistant_message = ChatMessage(
+        thread_id=thread_id,
+        role="assistant",
+        content=run.output_text or "",
+        turn_index=next_turn,
+        run_id=run.id,
+    )
+    db.add(assistant_message)
+    db.flush()
+
+    run.assistant_message_id = assistant_message.id
+    thread.last_run_id = run.id
+    if next_turn == 1:
+        thread.title = content[:80]
+
+    all_messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.thread_id == thread_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+    snapshot = build_summary_snapshot(all_messages)
+    if summary is None:
+        summary = ThreadSummary(thread_id=thread_id)
+        db.add(summary)
+    summary.summary_text = snapshot
+    summary.summarized_until_turn = next_turn
+    create_event(
+        db, run.id, "chat.summary.updated", "Updated thread rolling summary", actor="memory"
+    )
+
+    db.commit()
+    db.refresh(thread)
+    db.refresh(user_message)
+    db.refresh(assistant_message)
+    db.refresh(run)
+    return ChatTurnResponse(
+        thread=thread,
+        user_message=user_message,
+        assistant_message=assistant_message,
+        run=run,
     )
 
 
@@ -407,6 +676,11 @@ async def decide_approval(
         if run.budget_exceeded and run.output_text.strip() == "":
             run.status = RunStatus.FAILED
         create_event(db, run.id, "run.completed", "Run finished after approval")
+
+        if run.assistant_message_id:
+            assistant_message = db.get(ChatMessage, run.assistant_message_id)
+            if assistant_message is not None:
+                assistant_message.content = run.output_text or assistant_message.content
     except Exception as exc:
         run.status = RunStatus.FAILED
         create_event(db, run.id, "run.failed", str(exc), actor="executor")
@@ -419,3 +693,9 @@ async def decide_approval(
 @app.get(f"{settings.api_prefix}/memory", response_model=list[MemoryItemResponse])
 def list_memory(db: Session = Depends(get_db)) -> list[MemoryItem]:
     return db.query(MemoryItem).order_by(MemoryItem.created_at.desc()).limit(20).all()
+    (ChatMessageCreate,)
+    (ChatMessageResponse,)
+    (ChatThreadCreate,)
+    (ChatThreadDetailResponse,)
+    (ChatThreadResponse,)
+    (ChatTurnResponse,)

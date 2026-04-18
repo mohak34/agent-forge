@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -20,6 +21,10 @@ class RunResponse(BaseModel):
     budget_limit_usd: float
     budget_used_usd: float
     budget_exceeded: bool
+    thread_id: str | None
+    user_message_id: str | None
+    assistant_message_id: str | None
+    turn_index: int
     provider: str
     model: str
     output_text: str
@@ -136,3 +141,50 @@ class AgentTemplateResponse(BaseModel):
 class RunFromTemplateRequest(BaseModel):
     goal: str
     memory_enabled: bool = False
+
+
+class ChatThreadCreate(BaseModel):
+    title: str = "New chat"
+    memory_enabled: bool = False
+    template_id: str | None = None
+
+
+class ChatThreadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    title: str
+    memory_enabled: bool
+    template_id: str | None
+    last_run_id: str | None
+    created_at: datetime
+    updated_at: datetime | None
+
+
+class ChatMessageCreate(BaseModel):
+    content: str
+    route_mode: Literal["auto", "direct"] = "auto"
+
+
+class ChatMessageResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    thread_id: str
+    role: str
+    content: str
+    turn_index: int
+    run_id: str | None
+    created_at: datetime
+
+
+class ChatThreadDetailResponse(BaseModel):
+    thread: ChatThreadResponse
+    messages: list[ChatMessageResponse]
+
+
+class ChatTurnResponse(BaseModel):
+    thread: ChatThreadResponse
+    user_message: ChatMessageResponse
+    assistant_message: ChatMessageResponse | None = None
+    run: RunResponse | None = None

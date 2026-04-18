@@ -26,6 +26,12 @@ class Run(Base):
     budget_limit_usd: Mapped[float] = mapped_column(Float, default=0.05)
     budget_used_usd: Mapped[float] = mapped_column(Float, default=0.0)
     budget_exceeded: Mapped[bool] = mapped_column(Boolean, default=False)
+    thread_id: Mapped[str | None] = mapped_column(
+        ForeignKey("chat_threads.id", ondelete="SET NULL"), index=True, nullable=True
+    )
+    user_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    assistant_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    turn_index: Mapped[int] = mapped_column(Integer, default=0)
     provider: Mapped[str] = mapped_column(String(50), default="")
     model: Mapped[str] = mapped_column(String(120), default="")
     output_text: Mapped[str] = mapped_column(Text, default="")
@@ -42,6 +48,7 @@ class Run(Base):
         cascade="all, delete-orphan",
         order_by="TraceEvent.created_at",
     )
+    thread: Mapped["ChatThread | None"] = relationship(back_populates="runs")
 
 
 class TraceEvent(Base):
@@ -143,3 +150,70 @@ class AgentTemplate(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ChatThread(Base):
+    __tablename__ = "chat_threads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    title: Mapped[str] = mapped_column(String(180), default="New chat")
+    memory_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    template_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_templates.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    last_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    runs: Mapped[list[Run]] = relationship(back_populates="thread", foreign_keys=[Run.thread_id])
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        order_by="ChatMessage.created_at",
+    )
+    summary: Mapped["ThreadSummary | None"] = relationship(
+        back_populates="thread",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("chat_threads.id", ondelete="CASCADE"), index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), index=True)
+    content: Mapped[str] = mapped_column(Text)
+    turn_index: Mapped[int] = mapped_column(Integer, default=0)
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    thread: Mapped[ChatThread] = relationship(back_populates="messages")
+
+
+class ThreadSummary(Base):
+    __tablename__ = "thread_summaries"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    thread_id: Mapped[str] = mapped_column(
+        ForeignKey("chat_threads.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    summary_text: Mapped[str] = mapped_column(Text, default="")
+    summarized_until_turn: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    thread: Mapped[ChatThread] = relationship(back_populates="summary")
