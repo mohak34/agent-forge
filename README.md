@@ -1,20 +1,13 @@
 # agent-forge
 
-A web-based workspace where you type a goal and a team of AI roles works through it step by step.
+Structured research with agent teams. Ask a question, watch the plan execute, get a traced answer.
 
 ## What it does
 
-- You describe a task or ask a question
-- The system breaks it into steps, runs them in order, and shows you exactly what happened
-- It can search the web, fetch pages, and do math when needed
-- Every action is logged so you can trace how the answer was built
-
-## Stack
-
-- Frontend: SvelteKit + TypeScript + Tailwind CSS
-- Backend: FastAPI + SQLAlchemy + Postgres
-- Providers: Groq, OpenRouter, LM Studio
-- Infra: Docker Compose
+- Ask a question or describe a task
+- The system plans steps, runs them in order, and shows the full trace
+- Searches the web and fetches sources when needed
+- Every action is logged so you can see how the answer was built
 
 ## Run locally
 
