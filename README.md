@@ -17,10 +17,3 @@ docker compose up --build
 
 - App: http://localhost:5173
 - API docs: http://localhost:8000/docs
-
-## Dev mode (optional)
-
-```bash
-cd apps/api && uv sync && uv run uvicorn app.main:app --reload
-cd apps/web && bun install && bun run dev
-```
