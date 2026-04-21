@@ -6,6 +6,7 @@ from app.models import Run, TaskNode, TaskNodeStatus
 from app.policy import evaluate_tool_use
 from app.router import estimate_cost_usd, estimate_tokens, route_for_task
 from app.specialists import select_specialist, specialist_instruction
+from app.search_providers import research_and_fetch
 from app.tools import invoke_tool
 
 
@@ -74,15 +75,16 @@ async def execute_task_graph(
 
         selected_tool = ""
         tool_input = ""
+        tool_result = ""
         if node.kind == "research":
-            selected_tool = "search_web"
+            selected_tool = "research_and_fetch"
             tool_input = run.goal
         elif node.kind == "analysis":
             selected_tool = "calculator"
             tool_input = "2+2"
 
         if selected_tool:
-            decision = evaluate_tool_use(selected_tool)
+            decision = evaluate_tool_use("search_web" if selected_tool == "research_and_fetch" else selected_tool)
             create_event(
                 db,
                 run.id,
@@ -101,14 +103,31 @@ async def execute_task_graph(
                 )
                 continue
 
-            tool_result = invoke_tool(selected_tool, tool_input)
-            create_event(
-                db,
-                run.id,
-                "tool.invoked",
-                f"tool={selected_tool} input={tool_input} output={tool_result[:140]}",
-                actor=specialist,
-            )
+            if selected_tool == "research_and_fetch":
+                create_event(
+                    db,
+                    run.id,
+                    "tool.invoked",
+                    f"tool=search_web input={tool_input[:80]} (research agent: searching + fetching sources)",
+                    actor=specialist,
+                )
+                tool_result = research_and_fetch(tool_input)
+                create_event(
+                    db,
+                    run.id,
+                    "tool.completed",
+                    f"tool=research_and_fetch fetched {len([l for l in tool_result.split(chr(10)) if l.startswith('Source ')])} sources",
+                    actor=specialist,
+                )
+            else:
+                tool_result = invoke_tool(selected_tool, tool_input)
+                create_event(
+                    db,
+                    run.id,
+                    "tool.invoked",
+                    f"tool={selected_tool} input={tool_input} output={tool_result[:140]}",
+                    actor=specialist,
+                )
             prompt = f"{prompt}\nTool context ({selected_tool}): {tool_result}"
 
         token_estimate = estimate_tokens(prompt)

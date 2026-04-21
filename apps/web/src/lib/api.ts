@@ -129,6 +129,27 @@ export async function getRunTasks(runId: string) {
   return response.json();
 }
 
+export function streamRunEvents(runId: string, onEvent: (event: any) => void, onDone: () => void) {
+  const source = new EventSource(`${API_BASE}/runs/${runId}/stream`);
+  source.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      onEvent(data);
+      if (data.event_type === "run.final") {
+        source.close();
+        onDone();
+      }
+    } catch {
+      // ignore parse errors
+    }
+  };
+  source.onerror = () => {
+    source.close();
+    onDone();
+  };
+  return source;
+}
+
 export async function getTools() {
   const response = await fetch(`${API_BASE}/tools`);
   if (!response.ok) {

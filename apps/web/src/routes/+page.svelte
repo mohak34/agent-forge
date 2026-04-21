@@ -11,6 +11,7 @@
     listTemplates,
     listThreads,
     sendThreadMessage,
+    streamRunEvents,
     type ChatMessage,
     type ChatThread
   } from "$lib/api";
@@ -58,6 +59,10 @@
   let loading = $state(false);
   let error = $state("");
   let activeTab = $state<"overview" | "graph" | "traceability">("overview");
+
+  let streamingRunId = $state<string | null>(null);
+  let streamingStatus = $state<string>("");
+  let streamingMessages = $state<ChatMessage[]>([]);
 
   let chatFeedRef = $state<HTMLElement | null>(null);
   let approvalPollId: ReturnType<typeof setInterval> | null = null;
@@ -132,23 +137,72 @@
     if (!input.trim()) return;
     loading = true;
     error = "";
+
+    let threadId = activeThreadId;
+    let sentContent = input;
+
     try {
-      let threadId = activeThreadId;
       if (!threadId) {
         const created = await createThread(summarize(input), memoryEnabled, selectedTemplateId || null);
         threadId = created.id;
       }
 
-      const turn = await sendThreadMessage(threadId, input, routeMode);
-      activeThreadId = threadId;
+      // Immediately show user message
+      const userMsg: ChatMessage = {
+        id: "temp-user-" + Date.now(),
+        thread_id: threadId,
+        role: "user",
+        content: sentContent,
+        turn_index: messages.length + 1,
+        run_id: null,
+        created_at: new Date().toISOString(),
+      };
+      messages = [...messages, userMsg];
       input = "";
+      await scrollToBottom();
+
+      const turn = await sendThreadMessage(threadId, sentContent, routeMode);
+      activeThreadId = threadId;
+      const threadDetail = await getThread(threadId);
+      const runId = (turn.run?.id as string | undefined) || threadDetail.thread.last_run_id;
+
+      if (runId) {
+        streamingRunId = runId;
+        streamingStatus = "Thinking...";
+
+        streamRunEvents(runId, (event) => {
+          if (event.event_type === "plan.generated") {
+            streamingStatus = "Planning task graph...";
+          } else if (event.event_type === "task.assigned") {
+            streamingStatus = `Working on: ${event.detail}`;
+          } else if (event.event_type === "tool.invoked") {
+            if (event.detail.includes("research")) {
+              streamingStatus = "Research agent: searching web...";
+            } else if (event.detail.includes("search_web")) {
+              streamingStatus = "Searching web...";
+            } else if (event.detail.includes("fetch_url")) {
+              streamingStatus = "Fetching sources...";
+            }
+          } else if (event.event_type === "tool.completed") {
+            streamingStatus = "Analyzing sources...";
+          } else if (event.event_type === "model.routed") {
+            streamingStatus = "Processing with AI model...";
+          } else if (event.event_type === "run.output") {
+            streamingStatus = "Finalizing answer...";
+          }
+        }, async () => {
+          streamingRunId = null;
+          streamingStatus = "";
+          await loadThreads();
+          const detail = await getThread(threadId);
+          messages = detail.messages;
+          selectedRunId = runId;
+          await refreshRunPanels(selectedRunId);
+          await scrollToBottom();
+        });
+      }
 
       await loadThreads();
-      const detail = await getThread(threadId);
-      messages = detail.messages;
-      selectedRunId = (turn.run?.id as string | undefined) || detail.thread.last_run_id || inferRunIdFromMessages(detail.messages);
-      await refreshRunPanels(selectedRunId);
-
       if (mode === "power") {
         rightSidebarOpen = true;
       }
@@ -379,6 +433,23 @@
                 </div>
               </div>
             {/each}
+
+            {#if streamingRunId && streamingStatus}
+              <div class="flex gap-4">
+                <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold bg-primary text-primary-foreground">
+                  AF
+                </div>
+                <div class="mt-1 flex-1 min-w-0">
+                  <div class="flex items-center gap-3 text-sm text-muted-foreground">
+                    <span class="relative flex h-2 w-2">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                    </span>
+                    <span>{streamingStatus}</span>
+                  </div>
+                </div>
+              </div>
+            {/if}
           {/if}
         </div>
       </div>

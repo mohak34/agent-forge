@@ -137,6 +137,59 @@ def build_search_engine() -> FallbackSearchEngine:
     return FallbackSearchEngine(providers)
 
 
+_search_engine = build_search_engine()
+
+
+def research_and_fetch(query: str, max_results: int = 5, max_fetch_urls: int = 5) -> str:
+    """Search web, fetch top result URLs, and combine into research context."""
+    normalized_query = query.strip()
+    if not normalized_query:
+        raise ValueError("Research query cannot be empty")
+
+    search_results = _search_engine.search(normalized_query, max_results)
+    if not search_results:
+        return f"No search results found for '{normalized_query}'."
+
+    lines: list[str] = []
+    lines.append(f"Search results for '{normalized_query}':")
+    lines.append("")
+
+    for idx, result in enumerate(search_results, start=1):
+        lines.append(f"[{idx}] {result.title}")
+        lines.append(f"    URL: {result.url}")
+        if result.snippet:
+            lines.append(f"    Snippet: {result.snippet}")
+        lines.append("")
+
+    urls_to_fetch = [r.url for r in search_results[:max_fetch_urls] if r.url]
+    if urls_to_fetch:
+        lines.append("--- Fetched Content ---")
+        lines.append("")
+
+    for idx, url in enumerate(urls_to_fetch, start=1):
+        try:
+            fetch_result = _safe_fetch(url)
+            lines.append(f"Source [{idx}] ({url}):")
+            lines.append(fetch_result)
+            lines.append("")
+        except Exception as exc:
+            lines.append(f"Source [{idx}] ({url}): Failed to fetch - {exc}")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def _safe_fetch(url: str) -> str:
+    from app.tools import _safe_fetch_text
+    result = _safe_fetch_text(url, timeout_seconds=settings.web_fetch_timeout_seconds)
+    prefix = "Fetched "
+    if result.startswith(prefix):
+        parts = result.split(": ", 1)
+        if len(parts) == 2:
+            return parts[1]
+    return result
+
+
 def _extract_ddg_url(href: str) -> str:
     match = re.search(r"uddg=([^&]+)", href)
     if match:

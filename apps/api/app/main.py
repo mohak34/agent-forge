@@ -1,5 +1,8 @@
+import asyncio
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.bootstrap_migrations import run_bootstrap_migrations
@@ -658,6 +661,50 @@ def get_timeline(run_id: str, db: Session = Depends(get_db)) -> list[TraceEvent]
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return run.events
+
+
+@app.get(f"{settings.api_prefix}/runs/{{run_id}}/stream")
+def stream_run_events(run_id: str, db: Session = Depends(get_db)):
+    run = db.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    async def event_generator():
+        seen_count = 0
+        max_wait = 300  # 5 minutes max
+        waited = 0
+        while waited < max_wait:
+            db.expire_all()
+            events = (
+                db.query(TraceEvent)
+                .filter(TraceEvent.run_id == run_id)
+                .order_by(TraceEvent.created_at.asc())
+                .all()
+            )
+            new_events = events[seen_count:]
+            for event in new_events:
+                payload = {
+                    "event_type": event.event_type,
+                    "detail": event.detail,
+                    "actor": event.actor,
+                    "status": event.status,
+                    "created_at": event.created_at.isoformat() if event.created_at else None,
+                }
+                yield f"data: {__import__('json').dumps(payload)}\n\n"
+            seen_count = len(events)
+
+            # Check if run is finished
+            db.expire_all()
+            current_run = db.get(Run, run_id)
+            if current_run and current_run.status.value in {"completed", "failed", "waiting_approval"}:
+                final = {"event_type": "run.final", "detail": current_run.status.value, "actor": "system", "status": current_run.status.value}
+                yield f"data: {__import__('json').dumps(final)}\n\n"
+                break
+
+            await asyncio.sleep(1)
+            waited += 1
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @app.get(f"{settings.api_prefix}/runs/{{run_id}}/tasks", response_model=list[TaskNodeResponse])
