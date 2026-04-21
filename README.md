@@ -29,5 +29,5 @@ cd apps/web && bun install && bun run dev
 
 Copy `apps/api/.env.example` to `apps/api/.env` and set at least:
 
-- `GROQ_API_KEY` (or OpenRouter / LM Studio config)
+- `GROQ_API_KEY`
 - `MOCK_MODE=false` when you want live provider calls
