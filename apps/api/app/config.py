@@ -21,8 +21,12 @@ class Settings(BaseSettings):
     web_fetch_max_bytes: int = 120000
     web_search_timeout_seconds: int = 8
     web_user_agent: str = "agent-forge-api/0.1"
+    web_search_max_results: int = 5
+    web_search_provider_priority: str = "tavily,duckduckgo"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    tavily_api_key: str = ""
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
 settings = Settings()

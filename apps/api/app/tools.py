@@ -113,63 +113,25 @@ def _safe_fetch_text(url: str, timeout_seconds: int) -> str:
     return f"Fetched {safe_url} (host={host}): {preview}"
 
 
-def _search_duckduckgo(query: str) -> str:
+from app.search_providers import build_search_engine
+
+_search_engine = build_search_engine()
+
+
+def _search_web(query: str) -> str:
     normalized_query = query.strip()
     if not normalized_query:
         raise ValueError("Search query cannot be empty")
 
-    headers = {
-        "User-Agent": settings.web_user_agent,
-        "Accept": "application/json",
-    }
-    with httpx.Client(timeout=settings.web_search_timeout_seconds, follow_redirects=True) as client:
-        response = client.get(
-            "https://api.duckduckgo.com/",
-            params={
-                "q": normalized_query,
-                "format": "json",
-                "no_html": "1",
-                "skip_disambig": "1",
-            },
-            headers=headers,
-        )
-        response.raise_for_status()
-        payload = response.json()
+    results = _search_engine.search(normalized_query, settings.web_search_max_results)
+    if not results:
+        return f"Search results for '{normalized_query}': no high-confidence results"
 
     lines: list[str] = []
-    abstract = _normalize_whitespace(payload.get("AbstractText", ""))
-    if abstract:
-        source_url = payload.get("AbstractURL", "")
-        if source_url:
-            lines.append(f"1) {abstract} ({source_url})")
-        else:
-            lines.append(f"1) {abstract}")
+    for idx, result in enumerate(results, start=1):
+        line = f"{idx}) {result.snippet} ({result.url})" if result.snippet else f"{idx}) {result.title} ({result.url})"
+        lines.append(line)
 
-    related = payload.get("RelatedTopics", [])
-    count = len(lines)
-    for topic in related:
-        if count >= 5:
-            break
-        if isinstance(topic, dict) and "Text" in topic:
-            text = _normalize_whitespace(str(topic.get("Text", "")))
-            url = str(topic.get("FirstURL", "")).strip()
-            if text:
-                count += 1
-                lines.append(f"{count}) {text}{f' ({url})' if url else ''}")
-        elif isinstance(topic, dict) and "Topics" in topic:
-            nested = topic.get("Topics", [])
-            for item in nested:
-                if count >= 5:
-                    break
-                if isinstance(item, dict):
-                    text = _normalize_whitespace(str(item.get("Text", "")))
-                    url = str(item.get("FirstURL", "")).strip()
-                    if text:
-                        count += 1
-                        lines.append(f"{count}) {text}{f' ({url})' if url else ''}")
-
-    if not lines:
-        return f"Search results for '{normalized_query}': no high-confidence results"
     return f"Search results for '{normalized_query}': " + " | ".join(lines)
 
 
@@ -187,6 +149,6 @@ def invoke_tool(tool_name: str, payload: str) -> str:
         return _safe_fetch_text(payload, timeout_seconds=settings.web_fetch_timeout_seconds)
 
     if tool_name == "search_web":
-        return _search_duckduckgo(payload)
+        return _search_web(payload)
 
     raise ValueError(f"Unknown tool: {tool_name}")
