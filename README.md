@@ -17,3 +17,22 @@ docker compose up --build
 
 - App: http://localhost:5173
 - API docs: http://localhost:8000/docs
+
+## Dev mode (optional)
+
+```bash
+cd apps/api && uv sync && uv run uvicorn app.main:app --reload
+cd apps/web && bun install && bun run dev
+```
+
+## Environment
+
+Copy `apps/api/.env.example` to `apps/api/.env` and set at least:
+
+- `GROQ_API_KEY`
+- `MOCK_MODE=false` when you want live provider calls
+
+## Tool runtime note
+
+- `search_web` and `fetch_url` use live web retrieval with read-only safeguards.
+- Safety controls include URL scheme checks, local/private host blocking, fetch timeouts, and response byte limits.

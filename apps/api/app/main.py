@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app.memory import get_recent_memory, store_memory
 from app.orchestrator import execute_task_graph
+from app.policy import evaluate_tool_use
 from app.models import (
     AgentTemplate,
     ApprovalRequest,
@@ -26,6 +27,7 @@ from app.models import (
     TraceEvent,
 )
 from app.planner import build_task_plan
+from app.route_classifier import classify_route
 from app.schemas import (
     AgentTemplateCreate,
     AgentTemplateImport,
@@ -48,7 +50,7 @@ from app.schemas import (
     TraceEventResponse,
 )
 from app.executor import run_single_agent
-from app.tools import list_tools
+from app.tools import invoke_tool, list_tools
 
 app = FastAPI(title=settings.app_name)
 
@@ -133,6 +135,14 @@ def _recent_thread_messages(db: Session, thread_id: str, limit: int = 8) -> list
     )
     messages.reverse()
     return messages
+
+
+def _extract_first_url(text: str) -> str | None:
+    for token in text.split():
+        candidate = token.strip().strip(",.!?()[]{}<>'\"")
+        if candidate.startswith("http://") or candidate.startswith("https://"):
+            return candidate
+    return None
 
 
 async def execute_run_for_goal(
@@ -245,10 +255,12 @@ async def execute_run_for_goal(
 async def execute_direct_turn(
     db: Session,
     goal: str,
+    raw_message: str,
     memory_enabled: bool,
     thread_id: str,
     user_message_id: str,
     turn_index: int,
+    tool_mode: str = "none",
 ) -> Run:
     run = Run(
         goal=goal,
@@ -268,7 +280,55 @@ async def execute_direct_turn(
     )
 
     try:
-        result = await run_single_agent(goal, provider_override="groq")
+        prompt_for_model = goal
+
+        if tool_mode in {"search", "search+fetch"}:
+            policy_decision = evaluate_tool_use("search_web")
+            create_event(
+                db,
+                run.id,
+                "policy.checked",
+                f"tool=search_web decision={policy_decision.decision} reason={policy_decision.reason}",
+                actor="policy",
+            )
+            if policy_decision.decision == "allow":
+                search_result = invoke_tool("search_web", raw_message)
+                create_event(
+                    db,
+                    run.id,
+                    "tool.invoked",
+                    f"tool=search_web input={raw_message[:140]} output={search_result[:140]}",
+                    actor="direct-agent",
+                )
+                prompt_for_model = (
+                    f"{prompt_for_model}\n\nTool context (search_web): {search_result}"
+                )
+
+        if tool_mode == "search+fetch":
+            url_candidate = _extract_first_url(raw_message)
+            if url_candidate:
+                policy_decision = evaluate_tool_use("fetch_url")
+                create_event(
+                    db,
+                    run.id,
+                    "policy.checked",
+                    f"tool=fetch_url decision={policy_decision.decision} reason={policy_decision.reason}",
+                    actor="policy",
+                )
+                if policy_decision.decision == "allow":
+                    fetch_result = invoke_tool("fetch_url", url_candidate)
+                    create_event(
+                        db,
+                        run.id,
+                        "tool.invoked",
+                        f"tool=fetch_url input={url_candidate[:140]} output={fetch_result[:140]}",
+                        actor="direct-agent",
+                    )
+                    prompt_for_model = (
+                        f"{prompt_for_model}\n\nTool context (fetch_url): {fetch_result}"
+                    )
+
+        result = await run_single_agent(prompt_for_model, provider_override="groq")
         run.provider = result["provider"]
         run.model = result["model"]
         run.output_text = result["text"]
@@ -477,19 +537,37 @@ async def send_thread_message(
     recent = _recent_thread_messages(db, thread_id, limit=8)
     assembled_goal = assemble_thread_goal(content, summary.summary_text if summary else "", recent)
 
-    direct_mode = payload.route_mode == "direct" or (
-        payload.route_mode == "auto" and should_use_direct_mode(content)
-    )
+    selected_route = payload.route_mode
+    selected_tooling = "none"
+    route_reason = "manual route mode"
+
+    if payload.route_mode == "auto":
+        classifier_decision = await classify_route(content)
+        selected_route = classifier_decision["route"]
+        selected_tooling = classifier_decision["tooling"]
+        route_reason = classifier_decision["reason"]
+    elif payload.route_mode == "direct":
+        if should_use_direct_mode(content):
+            selected_tooling = "search"
+        else:
+            selected_tooling = "none"
+    elif payload.route_mode == "orchestrated":
+        selected_route = "orchestrated"
+        selected_tooling = "search+fetch"
+
+    direct_mode = selected_route == "direct"
 
     run: Run
     if direct_mode:
         run = await execute_direct_turn(
             db=db,
             goal=assembled_goal,
+            raw_message=content,
             memory_enabled=thread.memory_enabled,
             thread_id=thread_id,
             user_message_id=user_message.id,
             turn_index=next_turn,
+            tool_mode=selected_tooling,
         )
     else:
         run = await execute_run_for_goal(
@@ -507,6 +585,14 @@ async def send_thread_message(
             "Used thread summary + recent message window",
             actor="orchestrator",
         )
+
+    create_event(
+        db,
+        run.id,
+        "route.classified",
+        f"route={selected_route} tooling={selected_tooling} reason={route_reason}",
+        actor="router",
+    )
 
     assistant_message = ChatMessage(
         thread_id=thread_id,
@@ -693,9 +779,3 @@ async def decide_approval(
 @app.get(f"{settings.api_prefix}/memory", response_model=list[MemoryItemResponse])
 def list_memory(db: Session = Depends(get_db)) -> list[MemoryItem]:
     return db.query(MemoryItem).order_by(MemoryItem.created_at.desc()).limit(20).all()
-    (ChatMessageCreate,)
-    (ChatMessageResponse,)
-    (ChatThreadCreate,)
-    (ChatThreadDetailResponse,)
-    (ChatThreadResponse,)
-    (ChatTurnResponse,)

@@ -2,10 +2,12 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: agent-forge-postgres
+    env_file:
+      - .env
     environment:
-      POSTGRES_DB: agentforge
-      POSTGRES_USER: agentforge
-      POSTGRES_PASSWORD: agentforge
+      POSTGRES_DB: ${POSTGRES_DB:-agentforge}
+      POSTGRES_USER: ${POSTGRES_USER:-agentforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentforge}
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -17,9 +19,11 @@ services:
     image: minio/minio:latest
     container_name: agent-forge-minio
     command: server /data --console-address ":9001"
+    env_file:
+      - .env
     environment:
-      MINIO_ROOT_USER: agentforge
-      MINIO_ROOT_PASSWORD: agentforge123
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agentforge}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agentforge123}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -35,9 +39,10 @@ services:
       - postgres
       - redis
     env_file:
+      - .env
       - ./apps/api/.env
     environment:
-      DATABASE_URL: postgresql+psycopg://agentforge:agentforge@postgres:5432/agentforge
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://agentforge:agentforge@postgres:5432/agentforge}
     ports:
       - "8000:8000"
 

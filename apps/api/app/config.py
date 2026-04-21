@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     lmstudio_default_model: str = "local-model"
     mock_mode: bool = False
 
+    web_tools_enabled: bool = True
+    web_fetch_timeout_seconds: int = 8
+    web_fetch_max_bytes: int = 120000
+    web_search_timeout_seconds: int = 8
+    web_user_agent: str = "agent-forge-api/0.1"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
