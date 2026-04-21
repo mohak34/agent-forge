@@ -24,10 +24,3 @@ docker compose up --build
 cd apps/api && uv sync && uv run uvicorn app.main:app --reload
 cd apps/web && bun install && bun run dev
 ```
-
-## Environment
-
-Copy `apps/api/.env.example` to `apps/api/.env` and set at least:
-
-- `GROQ_API_KEY`
-- `MOCK_MODE=false` when you want live provider calls
