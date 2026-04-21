@@ -52,7 +52,7 @@
   let templates = $state<any[]>([]);
   let selectedTemplateId = $state("");
   let memoryEnabled = $state(false);
-  let routeMode = $state<"auto" | "direct">("auto");
+  let routeMode = $state<"auto" | "direct" | "orchestrated">("auto");
 
   let input = $state("");
   let loading = $state(false);
@@ -330,8 +330,9 @@
             <label class="flex items-center gap-2 text-xs text-foreground">
               Route mode
               <select class="rounded border border-border bg-card px-2 py-1 text-xs" bind:value={routeMode}>
-                <option value="auto">auto (hybrid)</option>
-                <option value="direct">direct only</option>
+                <option value="auto">auto (AI decides)</option>
+                <option value="direct">direct (fast)</option>
+                <option value="orchestrated">orchestrated (deep)</option>
               </select>
             </label>
           </div>

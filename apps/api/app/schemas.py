@@ -163,7 +163,7 @@ class ChatThreadResponse(BaseModel):
 
 class ChatMessageCreate(BaseModel):
     content: str
-    route_mode: Literal["auto", "direct"] = "auto"
+    route_mode: Literal["auto", "direct", "orchestrated"] = "auto"
 
 
 class ChatMessageResponse(BaseModel):

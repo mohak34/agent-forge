@@ -68,6 +68,11 @@ agent-forge is a modular multi-agent orchestration platform with a SvelteKit fro
   - `tool.invoked`
 - Tool catalog endpoint: `GET /api/v0/tools`
 
+Tool runtime note:
+
+- `search_web` and `fetch_url` now use live web retrieval with read-only safeguards.
+- Safety controls include URL scheme checks, local/private host blocking, fetch timeouts, and response byte limits.
+
 ## Phase F includes
 
 - Approval request model and queue for risky goals
@@ -171,6 +176,11 @@ bun run dev
 - `OPENROUTER_DEFAULT_MODEL`
 - `LMSTUDIO_DEFAULT_MODEL`
 - `MOCK_MODE` (`true`/`false`)
+- `WEB_TOOLS_ENABLED` (`true`/`false`)
+- `WEB_FETCH_TIMEOUT_SECONDS`
+- `WEB_FETCH_MAX_BYTES`
+- `WEB_SEARCH_TIMEOUT_SECONDS`
+- `WEB_USER_AGENT`
 
 ## Frontend dependency versions pinned
 

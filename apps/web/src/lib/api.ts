@@ -106,7 +106,7 @@ export async function listThreadMessages(threadId: string) {
 export async function sendThreadMessage(
   threadId: string,
   content: string,
-  routeMode: "auto" | "direct" = "auto"
+  routeMode: "auto" | "direct" | "orchestrated" = "auto"
 ) {
   const response = await fetch(`${API_BASE}/chat/threads/${threadId}/messages`, {
     method: "POST",
