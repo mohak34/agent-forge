@@ -1,13 +1,11 @@
 from sqlalchemy.orm import Session
 
 from app.critic import critic_review
-from app.executor import run_single_agent
+from app.executor import run_agent_with_tools
 from app.models import Run, TaskNode, TaskNodeStatus
-from app.policy import evaluate_tool_use
 from app.router import estimate_cost_usd, estimate_tokens, route_for_task
 from app.specialists import select_specialist, specialist_instruction
-from app.search_providers import research_and_fetch
-from app.tools import invoke_tool
+from app.tools import get_tool_schemas
 
 
 def _dependencies_met(node: TaskNode, completed_sequences: set[int]) -> bool:
@@ -28,6 +26,7 @@ async def execute_task_graph(
 ) -> tuple[dict, list[TaskNode]]:
     completed_sequences: set[int] = set()
     last_result: dict = {"provider": "", "model": "", "text": ""}
+    available_tools = get_tool_schemas()
 
     for node in task_nodes:
         if not _dependencies_met(node, completed_sequences):
@@ -73,63 +72,6 @@ async def execute_task_graph(
             actor="router",
         )
 
-        selected_tool = ""
-        tool_input = ""
-        tool_result = ""
-        if node.kind == "research":
-            selected_tool = "research_and_fetch"
-            tool_input = run.goal
-        elif node.kind == "analysis":
-            selected_tool = "calculator"
-            tool_input = "2+2"
-
-        if selected_tool:
-            decision = evaluate_tool_use("search_web" if selected_tool == "research_and_fetch" else selected_tool)
-            create_event(
-                db,
-                run.id,
-                "policy.checked",
-                f"tool={selected_tool} decision={decision.decision} reason={decision.reason}",
-                actor="policy",
-            )
-            if decision.decision != "allow":
-                node.status = TaskNodeStatus.BLOCKED
-                create_event(
-                    db,
-                    run.id,
-                    "task.blocked",
-                    f"Node {node.sequence} blocked by policy for tool={selected_tool}",
-                    actor="policy",
-                )
-                continue
-
-            if selected_tool == "research_and_fetch":
-                create_event(
-                    db,
-                    run.id,
-                    "tool.invoked",
-                    f"tool=search_web input={tool_input[:80]} (research agent: searching + fetching sources)",
-                    actor=specialist,
-                )
-                tool_result = research_and_fetch(tool_input)
-                create_event(
-                    db,
-                    run.id,
-                    "tool.completed",
-                    f"tool=research_and_fetch fetched {len([l for l in tool_result.split(chr(10)) if l.startswith('Source ')])} sources",
-                    actor=specialist,
-                )
-            else:
-                tool_result = invoke_tool(selected_tool, tool_input)
-                create_event(
-                    db,
-                    run.id,
-                    "tool.invoked",
-                    f"tool={selected_tool} input={tool_input} output={tool_result[:140]}",
-                    actor=specialist,
-                )
-            prompt = f"{prompt}\nTool context ({selected_tool}): {tool_result}"
-
         token_estimate = estimate_tokens(prompt)
         estimated_cost = estimate_cost_usd(route.provider, token_estimate)
         node.token_estimate = token_estimate
@@ -173,10 +115,23 @@ async def execute_task_graph(
             node.status = TaskNodeStatus.BLOCKED
             break
 
-        result = await run_single_agent(
+        async def on_tool_call(tool_name: str, payload: str) -> None:
+            create_event(
+                db,
+                run.id,
+                "tool.invoked",
+                f"tool={tool_name} input={payload[:140]}",
+                actor=specialist,
+            )
+            db.commit()
+
+        tools = available_tools if node.kind in {"research", "analysis"} else None
+        result = await run_agent_with_tools(
             prompt,
             provider_override=route.provider,
             model_override=route.model,
+            tools=tools,
+            on_tool_call=on_tool_call,
         )
         run.budget_used_usd = round(run.budget_used_usd + estimated_cost, 6)
         node_output = result["text"][:600].strip()
@@ -197,7 +152,11 @@ async def execute_task_graph(
                 f"Feedback: {critic_note}\n"
                 f"Current output: {node_output}"
             )
-            revised = await run_single_agent(revise_prompt)
+            revised = await run_agent_with_tools(
+                revise_prompt,
+                provider_override=route.provider,
+                model_override=route.model,
+            )
             node_output = revised["text"][:600].strip()
             result = revised
             create_event(

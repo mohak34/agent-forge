@@ -176,15 +176,15 @@
           } else if (event.event_type === "task.assigned") {
             streamingStatus = `Working on: ${event.detail}`;
           } else if (event.event_type === "tool.invoked") {
-            if (event.detail.includes("research")) {
-              streamingStatus = "Research agent: searching web...";
-            } else if (event.detail.includes("search_web")) {
-              streamingStatus = "Searching web...";
+            if (event.detail.includes("search_web")) {
+              streamingStatus = "Using search_web...";
             } else if (event.detail.includes("fetch_url")) {
               streamingStatus = "Fetching sources...";
+            } else if (event.detail.includes("calculator")) {
+              streamingStatus = "Using calculator...";
             }
           } else if (event.event_type === "tool.completed") {
-            streamingStatus = "Analyzing sources...";
+            streamingStatus = "Analyzing...";
           } else if (event.event_type === "model.routed") {
             streamingStatus = "Processing with AI model...";
           } else if (event.event_type === "run.output") {

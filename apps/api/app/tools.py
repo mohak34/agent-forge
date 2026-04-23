@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from html import unescape
 import ipaddress
+import json
 import re
 from urllib.parse import urlparse
 
@@ -35,6 +36,62 @@ TOOL_CATALOG = [
 
 def list_tools() -> list[ToolSpec]:
     return TOOL_CATALOG
+
+
+def get_tool_schemas() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_web",
+                "description": "Search the live web for current information, news, facts, or data. Use when the user asks about recent events, current data, or anything requiring up-to-date information beyond your training cutoff.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to submit to the web search engine",
+                        }
+                    },
+                    "required": ["query"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_url",
+                "description": "Fetch and read the content of a specific URL. Use when the user provides a URL or when you need to read a specific web page in detail.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "The full HTTP or HTTPS URL to fetch",
+                        }
+                    },
+                    "required": ["url"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "calculator",
+                "description": "Evaluate a basic arithmetic expression. Use for any math calculation.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "The arithmetic expression to evaluate, e.g. '2+2' or '(10 * 5) / 2'",
+                        }
+                    },
+                    "required": ["expression"],
+                },
+            },
+        },
+    ]
 
 
 def _ensure_http_url(raw_url: str) -> str:

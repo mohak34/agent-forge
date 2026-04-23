@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import traceback
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +11,11 @@ from app.bootstrap_migrations import run_bootstrap_migrations
 from app.chat_context import (
     assemble_thread_goal,
     build_summary_snapshot,
-    should_use_direct_mode,
 )
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.memory import get_recent_memory, store_memory
 from app.orchestrator import execute_task_graph
-from app.policy import evaluate_tool_use
 from app.models import (
     AgentTemplate,
     ApprovalRequest,
@@ -52,8 +52,8 @@ from app.schemas import (
     ToolResponse,
     TraceEventResponse,
 )
-from app.executor import run_single_agent
-from app.tools import invoke_tool, list_tools
+from app.executor import run_agent_with_tools
+from app.tools import get_tool_schemas, list_tools
 
 app = FastAPI(title=settings.app_name)
 
@@ -138,14 +138,6 @@ def _recent_thread_messages(db: Session, thread_id: str, limit: int = 8) -> list
     )
     messages.reverse()
     return messages
-
-
-def _extract_first_url(text: str) -> str | None:
-    for token in text.split():
-        candidate = token.strip().strip(",.!?()[]{}<>'\"")
-        if candidate.startswith("http://") or candidate.startswith("https://"):
-            return candidate
-    return None
 
 
 async def execute_run_for_goal(
@@ -249,6 +241,9 @@ async def execute_run_for_goal(
                 run.status = RunStatus.FAILED
             create_event(db, run.id, "run.completed", "Run finished")
     except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.error(f"execute_run_for_goal failed: {exc}")
+        logger.error(traceback.format_exc())
         run.status = RunStatus.FAILED
         create_event(db, run.id, "run.failed", str(exc), actor="executor")
 
@@ -263,7 +258,6 @@ async def execute_direct_turn(
     thread_id: str,
     user_message_id: str,
     turn_index: int,
-    tool_mode: str = "none",
 ) -> Run:
     run = Run(
         goal=goal,
@@ -283,55 +277,24 @@ async def execute_direct_turn(
     )
 
     try:
-        prompt_for_model = goal
+        available_tools = get_tool_schemas()
 
-        if tool_mode in {"search", "search+fetch"}:
-            policy_decision = evaluate_tool_use("search_web")
+        async def on_tool_call(tool_name: str, payload: str) -> None:
             create_event(
                 db,
                 run.id,
-                "policy.checked",
-                f"tool=search_web decision={policy_decision.decision} reason={policy_decision.reason}",
-                actor="policy",
+                "tool.invoked",
+                f"tool={tool_name} input={payload[:140]}",
+                actor="direct-agent",
             )
-            if policy_decision.decision == "allow":
-                search_result = invoke_tool("search_web", raw_message)
-                create_event(
-                    db,
-                    run.id,
-                    "tool.invoked",
-                    f"tool=search_web input={raw_message[:140]} output={search_result[:140]}",
-                    actor="direct-agent",
-                )
-                prompt_for_model = (
-                    f"{prompt_for_model}\n\nTool context (search_web): {search_result}"
-                )
+            db.commit()
 
-        if tool_mode == "search+fetch":
-            url_candidate = _extract_first_url(raw_message)
-            if url_candidate:
-                policy_decision = evaluate_tool_use("fetch_url")
-                create_event(
-                    db,
-                    run.id,
-                    "policy.checked",
-                    f"tool=fetch_url decision={policy_decision.decision} reason={policy_decision.reason}",
-                    actor="policy",
-                )
-                if policy_decision.decision == "allow":
-                    fetch_result = invoke_tool("fetch_url", url_candidate)
-                    create_event(
-                        db,
-                        run.id,
-                        "tool.invoked",
-                        f"tool=fetch_url input={url_candidate[:140]} output={fetch_result[:140]}",
-                        actor="direct-agent",
-                    )
-                    prompt_for_model = (
-                        f"{prompt_for_model}\n\nTool context (fetch_url): {fetch_result}"
-                    )
-
-        result = await run_single_agent(prompt_for_model, provider_override="groq")
+        result = await run_agent_with_tools(
+            goal,
+            provider_override="groq",
+            tools=available_tools,
+            on_tool_call=on_tool_call,
+        )
         run.provider = result["provider"]
         run.model = result["model"]
         run.output_text = result["text"]
@@ -346,6 +309,9 @@ async def execute_direct_turn(
         run.status = RunStatus.COMPLETED
         create_event(db, run.id, "run.completed", "Direct run finished")
     except Exception as exc:
+        logger = logging.getLogger(__name__)
+        logger.error(f"execute_direct_turn failed: {exc}")
+        logger.error(traceback.format_exc())
         run.status = RunStatus.FAILED
         create_event(db, run.id, "run.failed", str(exc), actor="executor")
 
@@ -541,22 +507,14 @@ async def send_thread_message(
     assembled_goal = assemble_thread_goal(content, summary.summary_text if summary else "", recent)
 
     selected_route = payload.route_mode
-    selected_tooling = "none"
     route_reason = "manual route mode"
 
     if payload.route_mode == "auto":
         classifier_decision = await classify_route(content)
         selected_route = classifier_decision["route"]
-        selected_tooling = classifier_decision["tooling"]
         route_reason = classifier_decision["reason"]
-    elif payload.route_mode == "direct":
-        if should_use_direct_mode(content):
-            selected_tooling = "search"
-        else:
-            selected_tooling = "none"
     elif payload.route_mode == "orchestrated":
         selected_route = "orchestrated"
-        selected_tooling = "search+fetch"
 
     direct_mode = selected_route == "direct"
 
@@ -570,7 +528,6 @@ async def send_thread_message(
             thread_id=thread_id,
             user_message_id=user_message.id,
             turn_index=next_turn,
-            tool_mode=selected_tooling,
         )
     else:
         run = await execute_run_for_goal(
@@ -593,7 +550,7 @@ async def send_thread_message(
         db,
         run.id,
         "route.classified",
-        f"route={selected_route} tooling={selected_tooling} reason={route_reason}",
+        f"route={selected_route} reason={route_reason}",
         actor="router",
     )
 

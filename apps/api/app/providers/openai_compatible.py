@@ -1,6 +1,6 @@
 import httpx
 
-from app.providers.base import ChatMessage, ChatProvider, ChatResult
+from app.providers.base import ChatMessage, ChatProvider, ChatResult, ToolCall
 
 
 class OpenAICompatibleProvider(ChatProvider):
@@ -18,12 +18,28 @@ class OpenAICompatibleProvider(ChatProvider):
         self.api_key = api_key
         self.extra_headers = extra_headers or {}
 
-    async def chat(self, messages: list[ChatMessage]) -> ChatResult:
+    async def chat(self, messages: list[ChatMessage], tools: list[dict] | None = None) -> ChatResult:
+        payload_messages = []
+        for m in messages:
+            msg = {"role": m.role, "content": m.content}
+            if m.tool_call_id:
+                msg["tool_call_id"] = m.tool_call_id
+            if m.name:
+                msg["name"] = m.name
+            if m.tool_calls:
+                msg["tool_calls"] = m.tool_calls
+            payload_messages.append(msg)
+
         payload = {
             "model": self.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": payload_messages,
             "temperature": 0.2,
         }
+
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+            payload["parallel_tool_calls"] = False
 
         headers = {"Content-Type": "application/json", **self.extra_headers}
         if self.api_key:
@@ -37,13 +53,26 @@ class OpenAICompatibleProvider(ChatProvider):
             data = response.json()
 
         output = ""
+        tool_calls = None
         choices = data.get("choices", [])
         if choices:
-            output = choices[0].get("message", {}).get("content", "")
+            message = choices[0].get("message", {})
+            output = message.get("content", "") or ""
+            raw_tool_calls = message.get("tool_calls")
+            if raw_tool_calls:
+                tool_calls = [
+                    ToolCall(
+                        id=tc.get("id", ""),
+                        function_name=tc.get("function", {}).get("name", ""),
+                        arguments=tc.get("function", {}).get("arguments", ""),
+                    )
+                    for tc in raw_tool_calls
+                ]
 
         return ChatResult(
             provider=self.name,
             model=self.model,
             output_text=output,
             raw_response=data,
+            tool_calls=tool_calls,
         )
