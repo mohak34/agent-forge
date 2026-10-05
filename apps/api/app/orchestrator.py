@@ -86,7 +86,7 @@ async def execute_task_graph(
             provider=route.provider,
         )
 
-        verdict, critic_note = critic_review(output)
+        verdict, critic_note = await critic_review(node.title, output)
         create_event(
             db,
             run.id,
