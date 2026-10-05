@@ -11,25 +11,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-  redis:
-    image: redis:7-alpine
-    container_name: agent-forge-redis
-
-  minio:
-    image: minio/minio:latest
-    container_name: agent-forge-minio
-    command: server /data --console-address ":9001"
-    env_file:
-      - .env
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-agentforge}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-agentforge123}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-
   api:
     build:
       context: ./apps/api
@@ -37,7 +18,6 @@ services:
     container_name: agent-forge-api
     depends_on:
       - postgres
-      - redis
     env_file:
       - .env
       - ./apps/api/.env
@@ -58,4 +38,3 @@ services:
 
 volumes:
   postgres_data:
-  minio_data:
