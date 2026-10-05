@@ -11,11 +11,13 @@ class RouteDecision:
     reason: str
 
 
-# USD per 1M tokens (input, output), from Groq's public price list. Unknown models
-# fall back to the 120B rate so budgets err on the expensive side.
+# USD per 1M tokens (input, output) at each model's paid list price. Free-tier variants
+# are charged at their paid equivalent so cost comparisons reflect a real deployment.
+# Unknown models fall back to the 120B rate so budgets err on the expensive side.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
     "openai/gpt-oss-20b": (0.075, 0.30),
     "openai/gpt-oss-120b": (0.15, 0.60),
+    "muse-spark-1.3-contributor-free": (1.25, 4.25),  # OpenCode Zen, muse-spark-1.3 rate
     "local-model": (0.0, 0.0),
 }
 DEFAULT_PRICE = MODEL_PRICES["openai/gpt-oss-120b"]

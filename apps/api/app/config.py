@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     groq_default_model: str = "openai/gpt-oss-20b"
     openrouter_default_model: str = "openai/gpt-4o-mini"
     lmstudio_default_model: str = "local-model"
+    zen_default_model: str = "muse-spark-1.3-contributor-free"
     mock_mode: bool = False
 
     web_tools_enabled: bool = True
@@ -26,6 +27,7 @@ class Settings(BaseSettings):
 
     tavily_api_key: str = ""
     typesafe_api_key: str = ""
+    opencode_api_key: str = ""
 
     # Paths are relative to apps/api: the repo-root .env, then apps/api/.env overrides it.
     # Missing files are skipped, so this also works inside the container.

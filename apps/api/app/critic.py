@@ -8,9 +8,9 @@ ADEQUATE = jev.noul(
 )
 
 
-# Jev judges the step output when a TypeSafe key is set; otherwise a length heuristic.
+# Jev judges the step output when a Jev key is set; otherwise a length heuristic.
 async def critic_review(task: str, output_text: str) -> tuple[str, str]:
-    if settings.typesafe_api_key and not settings.mock_mode:
+    if jev.available() and not settings.mock_mode:
         answers = await jev.ask({"task": task, "output": output_text[-3000:]}, {"ok": ADEQUATE})
         p_ok = float(answers["ok"]["noul"])
         if p_ok < 0.5:
