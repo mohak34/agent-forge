@@ -1,12 +1,12 @@
+import ipaddress
+import re
 from dataclasses import dataclass
 from html import unescape
-import ipaddress
-import json
-import re
 from urllib.parse import urlparse
 
 import httpx
 
+from app import cache
 from app.config import settings
 
 
@@ -202,10 +202,16 @@ def invoke_tool(tool_name: str, payload: str) -> str:
         except Exception as exc:
             raise ValueError(f"Calculator failed: {exc}") from exc
 
-    if tool_name == "fetch_url":
-        return _safe_fetch_text(payload, timeout_seconds=settings.web_fetch_timeout_seconds)
-
-    if tool_name == "search_web":
-        return _search_web(payload)
+    if tool_name in {"fetch_url", "search_web"}:
+        key = cache.make_key("tool", tool_name, payload)
+        cached = cache.get(key)
+        if isinstance(cached, str):
+            return cached
+        if tool_name == "fetch_url":
+            output = _safe_fetch_text(payload, timeout_seconds=settings.web_fetch_timeout_seconds)
+        else:
+            output = _search_web(payload)
+        cache.put(key, output)
+        return output
 
     raise ValueError(f"Unknown tool: {tool_name}")

@@ -57,3 +57,6 @@ apps/web/.vite/
 
 # Docker/local runtime artifacts
 .env.local
+
+# Eval call cache (replayable locally, not committed)
+apps/api/eval/cache.sqlite
