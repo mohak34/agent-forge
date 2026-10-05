@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.agent import run_direct
 from app.bootstrap_migrations import run_bootstrap_migrations
 from app.chat_context import (
     assemble_thread_goal,
@@ -15,7 +16,6 @@ from app.chat_context import (
 from app.config import settings
 from app.database import Base, engine, get_db
 from app.memory import get_recent_memory, store_memory
-from app.orchestrator import execute_task_graph
 from app.models import (
     AgentTemplate,
     ApprovalRequest,
@@ -29,8 +29,11 @@ from app.models import (
     ThreadSummary,
     TraceEvent,
 )
-from app.planner import build_task_plan
+from app.orchestrator import execute_task_graph
+from app.planner import plan_steps, to_task_nodes
+from app.providers.base import Usage
 from app.route_classifier import classify_route
+from app.router import cost_usd
 from app.schemas import (
     AgentTemplateCreate,
     AgentTemplateImport,
@@ -52,8 +55,7 @@ from app.schemas import (
     ToolResponse,
     TraceEventResponse,
 )
-from app.executor import run_agent_with_tools
-from app.tools import get_tool_schemas, list_tools
+from app.tools import list_tools
 
 app = FastAPI(title=settings.app_name)
 
@@ -161,7 +163,10 @@ async def execute_run_for_goal(
 
     create_event(db, run.id, "run.created", "Goal accepted")
 
-    nodes = build_task_plan(run)
+    plan_usage = Usage()
+    steps = await plan_steps(run.goal, settings.groq_default_model, plan_usage)
+    run.budget_used_usd = round(cost_usd(settings.groq_default_model, plan_usage), 6)
+    nodes = to_task_nodes(run, steps)
     for node in nodes:
         db.add(node)
     db.flush()
@@ -277,7 +282,6 @@ async def execute_direct_turn(
     )
 
     try:
-        available_tools = get_tool_schemas()
 
         async def on_tool_call(tool_name: str, payload: str) -> None:
             create_event(
@@ -289,16 +293,13 @@ async def execute_direct_turn(
             )
             db.commit()
 
-        result = await run_agent_with_tools(
-            goal,
-            provider_override="groq",
-            tools=available_tools,
-            on_tool_call=on_tool_call,
-        )
-        run.provider = result["provider"]
-        run.model = result["model"]
-        run.output_text = result["text"]
-        run.token_estimate = estimate_tokens(result["text"])
+        usage = Usage()
+        model = settings.groq_default_model
+        run.output_text = await run_direct(goal, model, usage, on_tool_call)
+        run.provider = "groq"
+        run.model = model
+        run.token_estimate = usage.input_tokens + usage.output_tokens
+        run.budget_used_usd = round(cost_usd(model, usage), 6)
         create_event(
             db,
             run.id,

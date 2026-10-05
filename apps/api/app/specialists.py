@@ -4,15 +4,17 @@ def select_specialist(task_kind: str) -> str:
         "research": "researcher",
         "analysis": "analyst",
         "writing": "writer",
-        "execution": "operator",
     }
     return mapping.get(task_kind, "generalist")
 
 
-def specialist_instruction(specialist: str, goal: str, task_title: str) -> str:
+def specialist_system(specialist: str) -> str:
+    if specialist == "writer":
+        return (
+            "You are the writer on a team of agents. Using the team's work, answer the "
+            "overall goal directly and concisely. Put the answer first."
+        )
     return (
-        f"You are acting as the {specialist} specialist in agent-forge. "
-        "Do the assigned task with concise, useful output.\n"
-        f"Global goal: {goal}\n"
-        f"Assigned task: {task_title}"
+        f"You are the {specialist} on a team of agents. Do only your assigned task, using "
+        "tools when you need facts. Report what you found concisely, with sources."
     )

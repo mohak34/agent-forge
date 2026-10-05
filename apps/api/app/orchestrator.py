@@ -1,45 +1,27 @@
 from sqlalchemy.orm import Session
 
+from app.agent import run_step
 from app.critic import critic_review
 from app.executor import run_agent_with_tools
 from app.models import Run, TaskNode, TaskNodeStatus
-from app.router import estimate_cost_usd, estimate_tokens, route_for_task
-from app.specialists import select_specialist, specialist_instruction
-from app.tools import get_tool_schemas
+from app.planner import Step
+from app.providers.base import Usage
+from app.router import cost_usd, estimate_cost_usd, estimate_tokens, route_for_task
+from app.specialists import select_specialist
 
 
-def _dependencies_met(node: TaskNode, completed_sequences: set[int]) -> bool:
-    if not node.depends_on:
-        return True
-    required = [part.strip() for part in node.depends_on.split(",") if part.strip()]
-    for dep in required:
-        if not dep.isdigit() or int(dep) not in completed_sequences:
-            return False
-    return True
-
-
+# Runs planned task nodes in sequence for the chat app, logging every decision as a
+# trace event and charging real token cost against the run's budget.
 async def execute_task_graph(
     db: Session,
     run: Run,
     task_nodes: list[TaskNode],
     create_event,
 ) -> tuple[dict, list[TaskNode]]:
-    completed_sequences: set[int] = set()
+    prior: list[tuple[str, str]] = []
     last_result: dict = {"provider": "", "model": "", "text": ""}
-    available_tools = get_tool_schemas()
 
     for node in task_nodes:
-        if not _dependencies_met(node, completed_sequences):
-            node.status = TaskNodeStatus.BLOCKED
-            create_event(
-                db,
-                run.id,
-                "task.blocked",
-                f"Node {node.sequence} blocked: missing dependencies {node.depends_on}",
-                actor="orchestrator",
-            )
-            continue
-
         specialist = select_specialist(node.kind)
         create_event(
             db,
@@ -58,10 +40,21 @@ async def execute_task_graph(
             actor=specialist,
         )
 
-        prompt = specialist_instruction(specialist=specialist, goal=run.goal, task_title=node.title)
-
         budget_remaining = max(run.budget_limit_usd - run.budget_used_usd, 0.0)
         route = route_for_task(node.kind, budget_remaining)
+        token_estimate = estimate_tokens(run.goal + "".join(out for _, out in prior))
+        estimated_cost = estimate_cost_usd(route.model, token_estimate)
+        if route.provider != "lmstudio" and estimated_cost > budget_remaining:
+            route = route_for_task(node.kind, 0.0)
+            run.budget_exceeded = True
+            create_event(
+                db,
+                run.id,
+                "model.fallback",
+                f"node={node.sequence} estimated={estimated_cost:.6f} exceeds remaining="
+                f"{budget_remaining:.6f}, fallback to {route.provider}/{route.model}",
+                actor="router",
+            )
         node.routed_provider = route.provider
         node.routed_model = route.model
         create_event(
@@ -72,71 +65,28 @@ async def execute_task_graph(
             actor="router",
         )
 
-        token_estimate = estimate_tokens(prompt)
-        estimated_cost = estimate_cost_usd(route.provider, token_estimate)
-        node.token_estimate = token_estimate
-        node.cost_estimate_usd = estimated_cost
-
-        create_event(
-            db,
-            run.id,
-            "budget.checked",
-            f"node={node.sequence} remaining={budget_remaining:.6f} estimated={estimated_cost:.6f}",
-            actor="router",
-        )
-
-        if (
-            run.budget_used_usd + estimated_cost > run.budget_limit_usd
-            and route.provider != "lmstudio"
-        ):
-            fallback = route_for_task(node.kind, 0.0)
-            node.routed_provider = fallback.provider
-            node.routed_model = fallback.model
-            create_event(
-                db,
-                run.id,
-                "model.fallback",
-                f"node={node.sequence} fallback to provider={fallback.provider} model={fallback.model}",
-                actor="router",
-            )
-            route = fallback
-            estimated_cost = estimate_cost_usd(route.provider, token_estimate)
-            node.cost_estimate_usd = estimated_cost
-
-        if run.budget_used_usd + estimated_cost > run.budget_limit_usd:
-            run.budget_exceeded = True
-            create_event(
-                db,
-                run.id,
-                "budget.exceeded",
-                f"node={node.sequence} budget limit reached, stopping execution",
-                actor="router",
-            )
-            node.status = TaskNodeStatus.BLOCKED
-            break
-
-        async def on_tool_call(tool_name: str, payload: str) -> None:
+        async def on_tool_call(tool_name: str, payload: str, actor: str = specialist) -> None:
             create_event(
                 db,
                 run.id,
                 "tool.invoked",
                 f"tool={tool_name} input={payload[:140]}",
-                actor=specialist,
+                actor=actor,
             )
             db.commit()
 
-        tools = available_tools if node.kind in {"research", "analysis"} else None
-        result = await run_agent_with_tools(
-            prompt,
-            provider_override=route.provider,
-            model_override=route.model,
-            tools=tools,
-            on_tool_call=on_tool_call,
+        usage = Usage()
+        output = await run_step(
+            run.goal,
+            Step(node.title, node.kind),
+            prior,
+            route.model,
+            usage,
+            on_tool_call,
+            provider=route.provider,
         )
-        run.budget_used_usd = round(run.budget_used_usd + estimated_cost, 6)
-        node_output = result["text"][:600].strip()
 
-        verdict, critic_note = critic_review(node_output)
+        verdict, critic_note = critic_review(output)
         create_event(
             db,
             run.id,
@@ -144,21 +94,15 @@ async def execute_task_graph(
             f"Node {node.sequence} verdict={verdict} note={critic_note}",
             actor="critic",
         )
-
         if verdict == "revise":
-            revise_prompt = (
-                f"Revise this task output based on critic feedback.\n"
-                f"Task: {node.title}\n"
-                f"Feedback: {critic_note}\n"
-                f"Current output: {node_output}"
-            )
             revised = await run_agent_with_tools(
-                revise_prompt,
+                f"Revise this task output based on critic feedback.\n"
+                f"Task: {node.title}\nFeedback: {critic_note}\nCurrent output: {output}",
                 provider_override=route.provider,
                 model_override=route.model,
+                usage=usage,
             )
-            node_output = revised["text"][:600].strip()
-            result = revised
+            output = revised["text"]
             create_event(
                 db,
                 run.id,
@@ -167,9 +111,22 @@ async def execute_task_graph(
                 actor=specialist,
             )
 
-        node.output_text = node_output
+        node_cost = cost_usd(route.model, usage)
+        run.budget_used_usd = round(run.budget_used_usd + node_cost, 6)
+        node.token_estimate = usage.input_tokens + usage.output_tokens
+        node.cost_estimate_usd = round(node_cost, 6)
+        create_event(
+            db,
+            run.id,
+            "budget.charged",
+            f"node={node.sequence} tokens={node.token_estimate} cost={node_cost:.6f} "
+            f"used={run.budget_used_usd:.6f}/{run.budget_limit_usd:.6f}",
+            actor="router",
+        )
+
+        node.output_text = output
         node.status = TaskNodeStatus.COMPLETED
-        completed_sequences.add(node.sequence)
+        prior.append((node.title, output))
         create_event(
             db,
             run.id,
@@ -177,6 +134,6 @@ async def execute_task_graph(
             f"Node {node.sequence} completed: {node.title}",
             actor=specialist,
         )
-        last_result = result
+        last_result = {"provider": route.provider, "model": route.model, "text": output}
 
     return last_result, task_nodes
