@@ -1,15 +1,6 @@
-import asyncio
-import logging
-
-import httpx
-
 from app import cache
 from app.providers.base import ChatMessage, ChatProvider, ChatResult, ToolCall
-
-logger = logging.getLogger(__name__)
-
-MAX_RETRIES = 6
-RETRY_STATUSES = {429, 500, 502, 503, 529}
+from app.providers.http import post_json
 
 
 class OpenAICompatibleProvider(ChatProvider):
@@ -86,24 +77,8 @@ class OpenAICompatibleProvider(ChatProvider):
             output_tokens=int(usage.get("completion_tokens", 0)),
         )
 
-    # Retries rate limits and transient server errors, honoring Retry-After when sent.
     async def _post(self, payload: dict) -> dict:
         headers = {"Content-Type": "application/json", **self.extra_headers}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            for attempt in range(MAX_RETRIES + 1):
-                response = await client.post(
-                    f"{self.base_url}/chat/completions", json=payload, headers=headers
-                )
-                if response.status_code not in RETRY_STATUSES or attempt == MAX_RETRIES:
-                    response.raise_for_status()
-                    return response.json()
-                retry_after = response.headers.get("retry-after", "")
-                delay = (
-                    float(retry_after) if retry_after.replace(".", "", 1).isdigit() else 2**attempt
-                )
-                logger.warning(f"{self.name} {response.status_code}, retrying in {delay:.1f}s")
-                await asyncio.sleep(min(delay, 120))
-        raise RuntimeError("unreachable")
+        return await post_json(f"{self.base_url}/chat/completions", payload, headers, self.name)

@@ -40,6 +40,7 @@ class Question:
 class Arm:
     name: str
     mode: str  # "direct" or "orchestrated"
+    provider: str
     model: str
     description: str
 
@@ -48,26 +49,30 @@ ARMS = [
     Arm(
         "direct-20b",
         "direct",
+        "groq",
         "openai/gpt-oss-20b",
         "Small model, single agent with web search",
     ),
     Arm(
-        "direct-120b",
+        "direct-muse",
         "direct",
-        "openai/gpt-oss-120b",
-        "Large model, single agent with web search",
+        "zen",
+        "muse-spark-1.3-contributor-free",
+        "Large frontier model, single agent with web search",
     ),
     Arm(
         "orch-20b",
         "orchestrated",
+        "groq",
         "openai/gpt-oss-20b",
         "Small model, planned multi-step team of specialist agents",
     ),
     Arm(
-        "orch-120b",
+        "orch-muse",
         "orchestrated",
-        "openai/gpt-oss-120b",
-        "Large model, planned multi-step team of specialist agents",
+        "zen",
+        "muse-spark-1.3-contributor-free",
+        "Large frontier model, planned multi-step team of specialist agents",
     ),
 ]
 ARM_NAMES = [arm.name for arm in ARMS]

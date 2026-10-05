@@ -1,6 +1,7 @@
 from app.config import settings
 from app.providers.base import ChatProvider
 from app.providers.openai_compatible import OpenAICompatibleProvider
+from app.providers.responses import ResponsesProvider
 
 
 def build_provider_registry() -> dict[str, ChatProvider]:
@@ -17,6 +18,12 @@ def build_provider_registry() -> dict[str, ChatProvider]:
             model=settings.openrouter_default_model,
             api_key=settings.openrouter_api_key,
             extra_headers={"HTTP-Referer": "https://agent-forge.local", "X-Title": "agent-forge"},
+        ),
+        "zen": ResponsesProvider(
+            name="zen",
+            base_url="https://opencode.ai/zen/v1",
+            model=settings.zen_default_model,
+            api_key=settings.opencode_api_key,
         ),
         "lmstudio": OpenAICompatibleProvider(
             name="lmstudio",

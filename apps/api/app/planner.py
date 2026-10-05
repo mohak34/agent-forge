@@ -49,9 +49,11 @@ def parse_plan(text: str) -> list[Step]:
     return steps
 
 
-async def plan_steps(goal: str, model: str, usage: Usage | None = None) -> list[Step]:
+async def plan_steps(
+    goal: str, model: str, usage: Usage | None = None, provider: str = "groq"
+) -> list[Step]:
     result = await run_agent_with_tools(
-        goal, provider_override="groq", model_override=model, system=PLANNER_SYSTEM, usage=usage
+        goal, provider_override=provider, model_override=model, system=PLANNER_SYSTEM, usage=usage
     )
     return parse_plan(result["text"])
 

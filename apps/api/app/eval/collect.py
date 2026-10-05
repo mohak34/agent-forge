@@ -24,7 +24,7 @@ async def run_arm(arm: Arm, question: Question) -> dict:
     started = time.monotonic()
     error = ""
     try:
-        answer = await runner(goal, arm.model, usage)
+        answer = await runner(goal, arm.model, usage, provider=arm.provider)
     except Exception as exc:  # noqa: BLE001 - any failure is recorded and retried next run
         answer, error = "", f"{type(exc).__name__}: {exc}"
     return {

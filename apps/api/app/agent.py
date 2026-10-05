@@ -64,11 +64,15 @@ async def run_step(
 
 
 async def run_orchestrated(
-    goal: str, model: str, usage: Usage, on_tool_call: ToolCallback | None = None
+    goal: str,
+    model: str,
+    usage: Usage,
+    on_tool_call: ToolCallback | None = None,
+    provider: str = "groq",
 ) -> str:
-    steps = await plan_steps(goal, model, usage)
+    steps = await plan_steps(goal, model, usage, provider)
     prior: list[tuple[str, str]] = []
     for step in steps:
-        output = await run_step(goal, step, prior, model, usage, on_tool_call)
+        output = await run_step(goal, step, prior, model, usage, on_tool_call, provider)
         prior.append((step.title, output))
     return prior[-1][1]
